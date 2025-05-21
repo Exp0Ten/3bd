@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" style="" xmlns:bx="https://boxy-svg.com">
+  <defs>
+    <linearGradient id="gradient-1" bx:pinned="true">
+      <stop offset="0.256" style="stop-color: rgb(64, 111, 248);"/>
+      <stop offset="0.533" style="stop-color: rgba(101, 101, 101, 0);"/>
+    </linearGradient>
+    <linearGradient id="gradient-2">
+      <stop offset="0.234" style="stop-color: rgb(239, 185, 71);"/>
+      <stop offset="0.56" style="stop-color: rgba(120, 120, 120, 0);"/>
+    </linearGradient>
+    <linearGradient id="gradient-0">
+      <stop offset="0.238" style="stop-color: rgb(245, 63, 56);"/>
+      <stop offset="0.521" style="stop-color: rgba(123, 123, 123, 0);"/>
+    </linearGradient>
+    <radialGradient id="gradient-1-0" href="#gradient-1" gradientUnits="userSpaceOnUse" cx="226.518" cy="287.959" r="27.163" gradientTransform="matrix(1.381276, -0.042604, 0.042604, 1.381276, -101.790235, -95.158736)"/>
+    <radialGradient id="gradient-0-0" href="#gradient-0" gradientUnits="userSpaceOnUse" cx="424.901" cy="294.38" r="34.335" gradientTransform="matrix(1.100759, 0, 0, 1.100759, -25.784452, -24.28031)"/>
+    <radialGradient id="gradient-2-0" href="#gradient-2" gradientUnits="userSpaceOnUse" cx="118.276" cy="187.569" r="34.335" gradientTransform="matrix(1.100759, 0, 0, 1.100759, -25.784452, -24.28031)"/>
+  </defs>
+  <path style="fill: none; stroke-linecap: round; stroke: rgb(220, 163, 28); stroke-width: 14px;" d="M 102.603 182.316 C 122.697 178.934 185.926 175.022 248.462 247.432 C 310.998 319.843 352.727 322.727 394.611 318.914"/>
+  <path style="fill: none; stroke-miterlimit: 5.25; stroke-linecap: round; stroke: rgb(190, 56, 44); transform-origin: 366.325px 216.18px 0px; stroke-width: 14px;" d="M 292.029 131.651 C 272.093 149.222 273.223 178.659 273.223 178.659 C 273.223 178.659 266.567 240.59 336.024 251.299 C 405.481 262.007 449.759 233.933 459.598 226.41" transform="matrix(-1, 0, 0, -1, 0, 0)"/>
+  <path style="fill: none; stroke-miterlimit: 5.25; stroke-linecap: round; stroke: rgb(57, 68, 194); transform-origin: 130.18px 283.132px 0px; stroke-width: 14px;" d="M 55.884 198.602 C 36.465 220.82 37.079 245.61 37.079 245.61 C 37.079 245.61 30.423 307.541 99.879 318.251 C 169.336 328.959 213.614 300.885 223.454 293.361"/>
+  <path style="fill: none; stroke-linecap: round; stroke: rgb(236, 200, 102); stroke-width: 7px; transform-origin: 255.681px 250.973px 0px;" d="M 112.55 177.264 C 132.915 174.432 194.212 171.003 254.549 247.194 C 314.884 323.385 353.548 325.18 395.879 322.595"/>
+  <ellipse style="fill-rule: nonzero; paint-order: fill; stroke-width: 1px; fill: url(&quot;#gradient-2-0&quot;);" cx="104.409" cy="182.188" rx="37.795" ry="37.795"/>
+  <path style="fill: none; stroke-miterlimit: 5.25; stroke-linecap: round; stroke: rgb(81, 126, 208); transform-origin: 124.841px 286.79px 0px; stroke-width: 7px;" d="M 52.353 198.034 C 32.35 219.691 32.376 244.812 32.376 244.812 C 32.376 244.812 24.226 307.217 93.62 321.039 C 163.014 334.86 208.084 308.341 218.129 301.149"/>
+  <ellipse style="fill-rule: nonzero; paint-order: fill; fill: url(&quot;#gradient-1-0&quot;);" cx="224.451" cy="291.853" rx="37.795" ry="37.795"/>
+  <path style="fill: none; stroke-miterlimit: 5.25; stroke-linecap: round; stroke: rgb(231, 62, 62); stroke-width: 7px; transform-origin: 364.261px 211.846px 0px;" d="M 444.708 293.255 C 462.949 275.824 459.389 247.115 459.389 247.115 C 459.389 247.115 460.82 186.589 391.289 177.139 C 321.755 167.691 280.332 195.722 271.232 203.208"/>
+  <ellipse style="fill-rule: nonzero; paint-order: fill; stroke-width: 1px; fill: url(&quot;#gradient-0-0&quot;);" cx="441.929" cy="299.761" rx="37.795" ry="37.795"/>
+</svg>

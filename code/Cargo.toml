@@ -1,0 +1,19 @@
+[package]
+name = "tbd"
+version = "0.9.0"
+edition = "2024"
+
+[dependencies]
+iced = {version = "0.13.1", features = ["svg"]}
+nix = {version = "0.30.1", features = ["ptrace", "signal", "process", "term"]}
+
+object = "0.37.3"
+gimli = "0.33.0" # for getting DWARF info (debug info)
+
+toml = {version = "0.9.8", features = ["parse", "serde"]}
+serde = "1.0"
+rust-embed = {version = "8.8.0", features = ["include-exclude"]}
+
+rfd = "0.17.2"
+
+iced-x86 = "1.21.0" # disassembler
