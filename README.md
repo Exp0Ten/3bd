@@ -7,3 +7,24 @@ My main inspiration was that I have seen very little user friendly debuggers or 
 I have played many puzzle games with programming aspects and loved the UI that was used for debugging or visualizing the software, and was very disappointed to find that commercial software lacks some basic theming options.
 I wish to therefore make it customizable enough and give the user the control over how they use the software. In the end, its just a piece of code running complex algorithms and it'd be sad someone chose to not use the tools just because of the outlook of the software.
 
+## Code
+Ideally, everything will be written in Rust, as I am a big fan of this language, mainly for its stability and speed. I am anticipating though that I will write certain code in C or Assembly language for better control. In that case I will be most likely making multiple .obj files, which I will compile together.
+
+## Arch
+This project is only for Linux, and limited to the AMD64 (x86_64) architecture. I have thought of making this program portable to different architectures using config files that specify the functionality/implementation for the processors, but decide that would be close to impossible.
+The second important thing is supported languages. C and Assembly are a given, as they are essential for general debugging. However, I won't be making language specific profile, meaning you will not be able to debug the languages for mistakes within that language, but only on the general level of runtime.
+Source code tracking will be a feature though, and I plan on dynamically displaying the variables, maybe linking them as well to the higher level code (like enums).
+
+## Features
+Basic and complete control over the child programs execution.
+Breakpoints, tracking source and assembly code.
+Dynamically interactive memory reading and label tracking and processing (maybe connecting to varibles and their types).
+Colors and types to make notes or see changes.
+Display of processor state (registers, pointers).
+C and Assembly support (maybe some easy high level code profiling using config files).
+Customizable UI (Displays, Terminal, Controls, Settings) + CLI version, all using config files.
+Complete documentation WITH mentions to the source code.
+
+
+## Disclaimer
+This project is for my finals and therefore I will have to write a lot of the documentation in Czech. I am open to translations, but all of those will be in designated folders.
