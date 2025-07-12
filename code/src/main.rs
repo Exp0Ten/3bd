@@ -8,6 +8,8 @@
 use std::fs;
 use nix;
 use iced;
+use nix::sys::ptrace;
+
 
 mod test;       // for testing and debbuging
 
