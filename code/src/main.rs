@@ -6,7 +6,7 @@
 */
 
 use std::fs;
-use libc;
+use nix;
 use iced;
 
 mod test;       // for testing and debbuging
