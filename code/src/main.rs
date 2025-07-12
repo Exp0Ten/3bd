@@ -4,10 +4,10 @@
     It handles errors, logging as feedback to development and the user, also is used as specification for all of the modules
     It handles the runtime, window, and debugging routine
 */
+
 use std::fs;
 use libc;
 use iced;
-
 
 mod test;       // for testing and debbuging
 
@@ -15,9 +15,10 @@ mod test;       // for testing and debbuging
 mod objdump;    // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
 mod trace;      // debugging programs
 mod data;       // data manipulation, reading
-mod ui;         // user interface - communication with user, preferences, config ...
+mod ui;         // user interface - communication with user, preferences, config ..., file selection, options
 mod window;     // window and graphics handling
 
 fn main() {
+    test::test();
     println!("Hello, world!");
 }
