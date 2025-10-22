@@ -21,6 +21,5 @@ mod ui;         // user interface - communication with user, preferences, config
 mod window;     // window and graphics handling
 
 fn main() {
-//    test::test();
-    println!("Hello, world!");
+    test::test();
 }
