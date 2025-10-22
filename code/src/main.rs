@@ -14,7 +14,7 @@ use nix::sys::ptrace;
 mod test;       // for testing and debbuging
 
 // the following files go in sequence based on what they depend on (tracing need objdump, data needs trace, ui needs data ...)
-mod objdump;    // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
+mod object;     // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
 mod trace;      // debugging programs
 mod data;       // data manipulation, reading
 mod ui;         // user interface - communication with user, preferences, config ..., file selection, options
