@@ -7,3 +7,4 @@ edition = "2024"
 #libc = "0.2.174"  #maybe use instead of nix, depends on if nix is gonna play along or not
 iced = "0.13.1"
 nix = {version = "0.30.1", features = ["ptrace", "signal"]}
+num_enum = "0.7.4"
