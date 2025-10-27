@@ -17,9 +17,12 @@ mod test;       // for testing and debbuging
 mod object;     // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
 mod trace;      // debugging programs
 mod data;       // data manipulation, reading
-mod ui;         // user interface - communication with user, preferences, config ..., file selection, options
+mod config;     // handling config and setting files located in ~/.config/tbd/
+mod ui;         // user interface - communicating with user
 mod window;     // window and graphics handling
+// mod keyboard;        // keyboard shortcuts handling
+
 
 fn main() {
-    test::test();
+    window::run().unwrap();
 }

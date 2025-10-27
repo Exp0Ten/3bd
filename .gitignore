@@ -2,3 +2,4 @@ code/target
 code/Cargo.lock
 *.o
 build/tmp
+/target
