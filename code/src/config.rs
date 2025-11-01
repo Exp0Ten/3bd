@@ -1,34 +1,57 @@
 use toml;
-use toml::value;
 
-use iced::window::Settings;
-
-use crate::ui;
+use crate::window;
 
 
-struct Config {
-    window: Settings,
-    palletes: Vec<Pallete>,
-    layouts: Vec<Layout>,
-    data: Vec<DataCategory>,
-    //keyboard: Vec<Keybind>
+pub fn get_app() -> Option<window::App> {
+    //Here i read from global or call a generic function to read to toml config file to retrieve the default App state
+    Some(window::App::new()) // for now (Im probably also gonna return only specific fields as well to limit imports)
 }
 
-struct Pallete {
+/* # I have no idea how to use this but want to
+trait BuiltIn {
 
+}
+*/
+/*
+pub struct Config {
+    name: String,
+    window: Settings,
+    theme: Theme,
+    layout: Layout,
+    keybinds: Keybinds,
 }
 
 struct Layout {
 
 }
 
-struct DataCategory {
-    name: String,
-    datatypes: Vec<DataType>
+struct Keybinds {
+
 }
 
-struct DataType {
-    name: String,
-    structure: value::Array,
-    byte_length: usize
+impl Config {
+    fn new(name: &str, ) -> Self {
+
+    }
 }
+
+impl Default for Config {
+    fn default() -> Self {
+        
+    }
+}
+
+
+impl Default for Layout {
+    fn default() -> Self {
+        
+    }
+}
+
+impl Default for Keybinds {
+    fn default() -> Self {
+        
+    }
+}
+*/

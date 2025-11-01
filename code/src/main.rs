@@ -5,24 +5,18 @@
     It handles the runtime, window, and debugging routine
 */
 
-use std::fs;
-use nix;
-use iced;
-use nix::sys::ptrace;
-
-
 mod test;       // for testing and debbuging
 
 // the following files go in sequence based on what they depend on (tracing need objdump, data needs trace, ui needs data ...)
 mod object;     // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
-mod trace;      // debugging programs
-mod data;       // data manipulation, reading
+mod trace;      // debugging programs (eg. backend for the ui and debug functions)
+mod data;       // data manipulation, reading (formatting, )
 mod config;     // handling config and setting files located in ~/.config/tbd/
-mod ui;         // user interface - communicating with user
-mod window;     // window and graphics handling
-// mod keyboard;        // keyboard shortcuts handling
+mod ui;         // user interface - communicating with user and graphics
+mod window;     // window handle
+// mod keyboard;        // keyboard shortcuts handling (in use with graphics)
 
 
 fn main() {
-    window::run().unwrap();
+    window::run_app().expect("Not working");
 }

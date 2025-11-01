@@ -1,37 +1,87 @@
-use iced::{application, widget::{pane_grid, text}};
+use iced::{application};
+use iced::{Element, Theme, Settings};
 
-struct State {
-    panes: pane_grid::State<Pane>
+use iced::widget::{text};
+
+
+use crate::{config, ui::*};
+
+#[derive(Default)]
+pub struct App {
+    state: State,
+    theme: Theme,
+    settings: Settings      //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
+    // add more as needed
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State { panes: iced::widget::pane_grid::State::new(Pane::PaneOne).0 }
-    }
-}
-
-enum Pane {
-    PaneOne
+pub struct State {
+//    panes: pane_grid::State<Pane>
+    // add more as needed
 }
 
 #[derive(Debug, Clone)]
 enum Message {
-
+    Pane(PaneMessage),
+    Operation(Operation),
+    Other
 }
 
+#[derive(Debug, Clone)]
+enum Operation {
+    NewWindow,
+    LoadFile,
+    ReloadFile,
+    SaveLog,
+    OpenSettings
+}
 
-pub fn run() -> iced::Result {
-    application("Three Body Debugger", update, view)
+pub fn run_app() -> iced::Result {
+    application("Three Body Debugger", App::update, App::view)
+    .theme(App::theme)
+    .settings(App::default().settings) // because we have to specify settings before execution we have to run this function twice
     .run()
 }
 
+impl App {
+    pub fn new() -> Self {
+        Self {
+            state: State::default(),
+            theme: Theme::Dark,
+            settings: Settings {
+                ..Default::default()
+            },
+        }
+    }
 
-fn update(state: &mut State, message: Message) {
+    fn default() -> Self {
+        config::get_app().unwrap_or(Self::new())
+    }
+
+    fn update(&mut self, message: Message) {
+        let state = &mut self.state;
+
+    }
+
+
+    fn view(&self) -> Element<'_, Message> {
+        let state = &self.state;
+
+        text("Hello").into()
+
+    }
+
+    fn theme(&self) -> Theme {
+        self.theme.clone()
+    }
+
+    fn settings(&self) -> Settings {
+        self.settings.clone()
+    }
 
 }
 
-fn view(state: &State) -> pane_grid::PaneGrid<Message> {
-    pane_grid(&state.panes, |pane, state, is_maximized| {
-        pane_grid::Content::new(text("Hello"))
-    })
+impl Default for State {
+    fn default() -> Self {
+        State {}
+    }
 }
