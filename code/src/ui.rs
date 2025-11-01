@@ -1,4 +1,9 @@
-use iced::widget::pane_grid;
+use iced::widget::{container, pane_grid, row, text};
+use iced::widget::{Container,};
+
+
+use crate::window::*;
+use crate::data::*;
 
 pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window)
     Memory,
@@ -12,60 +17,13 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     Terminal // maybe extrenal? well see
 }
 
-#[derive(Debug, Clone)]
-pub enum PaneMessage {
-    Memory(MemoryPaneMessage),
-    Stack(StackPaneMessage),
-    Code(CodePaneMessage),
-    Assembly(AssemblyPaneMessage),
-    Registers(RegistersPaneMessage),
-    Labels(LabelsPaneMessage),
-    Info(InfoPaneMessage), // ELF dump
-    Control(ControlPaneMessage),
-    Terminal(TerminalPaneMessage), // maybe extrenal? well see
-}
+pub fn titlebar(app: &App) -> Option<Container<'_, Message>> {
 
-#[derive(Debug, Clone)]
-enum MemoryPaneMessage {
 
-}
 
-#[derive(Debug, Clone)]
-enum StackPaneMessage {
-    
-}
-
-#[derive(Debug, Clone)]
-enum CodePaneMessage {
-    
-}
-
-#[derive(Debug, Clone)]
-enum AssemblyPaneMessage {
-    
-}
-
-#[derive(Debug, Clone)]
-enum RegistersPaneMessage {
-    
-}
-
-#[derive(Debug, Clone)]
-enum LabelsPaneMessage {
-    
-}
-
-#[derive(Debug, Clone)]
-enum InfoPaneMessage {
-
-}
-
-#[derive(Debug, Clone)]
-enum ControlPaneMessage {
-
-}
-
-#[derive(Debug, Clone)]
-enum TerminalPaneMessage {
-
+    Some(container(row![
+        icon,
+        title,
+        winbuttons
+    ]).into())
 }

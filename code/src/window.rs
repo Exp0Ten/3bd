@@ -1,10 +1,9 @@
 use iced::{application};
 use iced::{Element, Theme, Settings};
 
-use iced::widget::{text};
 
-
-use crate::{config, ui::*};
+use crate::ui::*;
+use crate::config;
 
 #[derive(Default)]
 pub struct App {
@@ -19,9 +18,10 @@ pub struct State {
     // add more as needed
 }
 
+
 #[derive(Debug, Clone)]
-enum Message {
-    Pane(PaneMessage),
+pub enum Message {
+    //Pane(PaneMessage),
     Operation(Operation),
     Other
 }
@@ -66,7 +66,8 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
 
-        text("Hello").into()
+        let titlebar: Option<_> = titlebar(&self);
+
 
     }
 
