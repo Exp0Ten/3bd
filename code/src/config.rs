@@ -1,7 +1,7 @@
 use toml;
 
 use crate::window;
-
+use crate::data::*;
 
 pub fn get_app() -> Option<window::App> {
     //Here i read from global or call a generic function to read to toml config file to retrieve the default App state

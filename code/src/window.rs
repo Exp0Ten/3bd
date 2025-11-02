@@ -1,44 +1,74 @@
-use iced::{application};
-use iced::{Element, Theme, Settings};
+use iced::{
+    Element, Task, Theme,
+    application, window,
+    widget::{
+        stack, column
+    }
+};
 
-
-use crate::ui::*;
-use crate::config;
+use crate::{
+    ui::*, config, trace
+};
 
 #[derive(Default)]
 pub struct App {
-    state: State,
-    theme: Theme,
-    settings: Settings      //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
+    pub state: State,
+    pub theme: Theme,
+    pub settings: window::Settings,      //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
     // add more as needed
 }
 
 pub struct State {
 //    panes: pane_grid::State<Pane>
+    pub maximized: bool
+    // add more as needed
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            maximized: false
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Window(WinMessage),
+    Pane(PaneMessage),
+    Operation(trace::Operation),
+    Other
     // add more as needed
 }
 
 
 #[derive(Debug, Clone)]
-pub enum Message {
-    //Pane(PaneMessage),
-    Operation(Operation),
-    Other
+pub enum WinMessage {
+    Resize(Direction),
+    Close,
+    Maximize,
+    Restore,
+    Minimize
 }
 
 #[derive(Debug, Clone)]
-enum Operation {
-    NewWindow,
-    LoadFile,
-    ReloadFile,
-    SaveLog,
-    OpenSettings
+pub enum Direction {
+    TopLeft,
+    Left,
+    BottomLeft,
+    Top,
+    Bottom,
+    TopRight,
+    Right,
+    BottomRight
 }
+
 
 pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
     .theme(App::theme)
-    .settings(App::default().settings) // because we have to specify settings before execution we have to run this function twice
+    .window(App::default().settings)
+//    .subscription() //probably will be needed
     .run()
 }
 
@@ -47,9 +77,10 @@ impl App {
         Self {
             state: State::default(),
             theme: Theme::Dark,
-            settings: Settings {
+            settings: window::Settings {
+                decorations: false,
                 ..Default::default()
-            },
+            }
         }
     }
 
@@ -57,32 +88,62 @@ impl App {
         config::get_app().unwrap_or(Self::new())
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         let state = &mut self.state;
 
+        let task: Task<Message> = match message {
+            Message::Window(window) => window_message(self, window),
+            Message::Operation(operation) => {trace::operation_message(operation); Task::none()},
+            Message::Pane(pane) => pane_message(state, pane),
+            Message::Other => Task::none(),
+            _ => Task::none()
+        };
+
+        task
     }
 
 
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
 
-        let titlebar: Option<_> = titlebar(&self);
+        let content = content(state);
 
+        // doesnt work yet, FIX
+        // if self.settings.decorations ...
+        let decorations: bool = false;
 
+        let result: Element<'_, Message> = if decorations {
+            content.into()
+        } else {
+            let titlebar = titlebar(&self);
+            let display = column![titlebar, content];
+            match state.maximized {
+                false => {
+                stack([
+                    resize_area(10).into(),
+                    display.into()
+                ]).into()
+                }
+
+                true => display.into()
+            }
+        };
+
+        result
     }
 
     fn theme(&self) -> Theme {
         self.theme.clone()
     }
 
-    fn settings(&self) -> Settings {
+    fn settings(&self) -> window::Settings {
         self.settings.clone()
     }
 
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State {}
+fn window_message(app: &mut App, window: WinMessage) -> Task<Message> {
+    match window {
+        _ => Task::none()
     }
 }

@@ -3,3 +3,4 @@ code/Cargo.lock
 *.o
 build/tmp
 /target
+# misc/symbolic # turn on in later releases, used now only for picking the icons
