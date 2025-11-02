@@ -1,11 +1,19 @@
 use std::sync::{Mutex, MutexGuard};
 use std::path::Path;
 
+use rust_embed::Embed; // to run as a single file binary without the dependecy on the file system
+
+#[derive(Embed)]
+#[folder = "assets/"]
+#[exclude = "*.md"]
+#[exclude = "*/LICENSE"]
+pub struct Asset;
+
 
 //Internal Data (for debbuging)
 #[derive(Debug, Clone)]
 pub struct Internal {
-    file: Option<Box<Path>>,
+    pub file: Option<Box<Path>>,
 }
 
 // Public Handle
