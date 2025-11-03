@@ -1,5 +1,5 @@
 use iced::{
-    Element, Task, Theme, Point,
+    Element, Point, Size, Task, Theme,
     application, window,
     widget::{
         column, stack
@@ -20,7 +20,7 @@ pub struct App {
 
 pub struct State {
     //    panes: pane_grid::State<Pane>
-    resizing: Option<Direction>,
+    resizing: Option<Resize>,
     pub maximized: bool,
     // add more as needed
 }
@@ -39,7 +39,7 @@ pub enum Message {
     Window(WinMessage),
     Pane(PaneMessage),
     Operation(trace::Operation),
-    Other
+    None
     // add more as needed
 }
 
@@ -55,6 +55,10 @@ pub enum WinMessage {
     Minimize
 }
 
+struct Resize {
+    start: Option<Point>,
+    direction: Direction
+}
 
 #[derive(Debug, Clone)]
 pub enum Direction {
@@ -98,7 +102,6 @@ impl App {
             Message::Window(window) => window_message(self, window),
             Message::Operation(operation) => {trace::operation_message(operation); Task::none()},
             Message::Pane(pane) => pane_message(state, pane),
-            Message::Other => Task::none(),
             _ => Task::none()
         };
 
@@ -118,10 +121,10 @@ impl App {
             let display = column![titlebar, content];
             match state.maximized {
                 false => {
-                stack([
-                    resize_area(15).into(),
-                    display.into()
-                ]).into()
+                    stack([
+                        resize_area(15).into(),
+                        display.into()
+                    ]).into()
                 }
 
                 true => display.into()
@@ -141,17 +144,67 @@ impl App {
 
 }
 
+
 fn window_message(app: &mut App, window: WinMessage) -> Task<Message> {
     match window {
-        WinMessage::ResizeStart(direction) => {app.state.resizing = Some(direction); Task::none()},
-        WinMessage::ResizeMove(point) => if let Some(direction) = &app.state.resizing
-            {resize(direction, point)} else {Task::none()},
+        WinMessage::ResizeStart(direction) => {
+            app.state.resizing = Some(Resize {start: None, direction: direction.clone()}); Task::none()
+        },
+        WinMessage::ResizeMove(point) =>
+            if let Some(Resize {direction, start}) = &mut app.state.resizing {
+                match start {
+                    None => *start = Some(point),
+                    _ => {}
+                };
+                resize(direction, start.expect("why are you"), point)
+            }
+            else {Task::none()}
+        ,
         WinMessage::ResizeDone => {app.state.resizing = None; Task::none()},
         _ => Task::none()
     }
 }
 
-fn resize(direction: &Direction, point: Point) -> Task<Message> {
-    println!("{:?}", direction);
-    Task::none()
+fn resize(direction: &Direction, start: Point, point: Point) -> Task<Message> {
+
+    struct Window {
+        position: Option<Point>,
+        size: Option<Size>
+    }
+
+    impl Window {
+        fn new(position: Option<Point>, size: Option<Size>) -> Self {
+            Self{position, size}
+        }
+
+        fn position(position: Option<Point>) -> Self {
+            Self{position, size: None}
+        }
+
+        fn size(size: Option<Size>) -> Self {
+            Self{position: None, size}
+        }
+    }
+
+    window::get_latest().and_then(|id| {
+        Task::batch([
+            window::get_position(id).map(|position| Window::position(position)).collect(),
+            window::get_size(id).map(|size| Window::size(Some(size))).collect()
+        ])
+        .then(|vector| {
+            let mut window = Window::new(vector[0].position, vector[1].size);
+
+            window = match direction {
+                Direction::Bottom => {
+                    Window::size()
+                },
+            };
+
+            match window.position {
+                Some(_) => todo!(),
+                None => todo!()
+            };
+            Task::done(Message::None)
+        })
+    })
 }
