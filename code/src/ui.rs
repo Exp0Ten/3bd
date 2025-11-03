@@ -1,11 +1,10 @@
 use iced::{
-    Length, Task,
+    Length, Task, mouse::Interaction, 
     widget::{
-        Container, Row, Text, Theme,
-        button, container, pane_grid, row, column, text, svg, mouse_area,
+        Container, MouseArea, Row, Text, Theme,
+        button, column, container, mouse_area, pane_grid, row, svg, text,
         svg::{Handle, Svg}
-    },
-    mouse::Interaction
+    }
 };
 
 use crate::{
@@ -114,40 +113,51 @@ pub fn resize_area<'a>(width: u8) -> Container<'a, Message> {
         row![
             column![
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::TopLeft)))
-                .interaction(Interaction::ResizingDiagonallyDown),
+                .mouse_resize_handle(Direction::TopLeft),
                 mouse_area(container(" ").center_y(Length::Fill))
-                .on_press(Message::Window(WinMessage::Resize(Direction::Left)))
-                .interaction(Interaction::ResizingHorizontally),
+                .mouse_resize_handle(Direction::Left),
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::BottomLeft)))
-                .interaction(Interaction::ResizingDiagonallyUp)
+                .mouse_resize_handle(Direction::BottomLeft)
                 ]
             .width(Length::Fixed(width.into())),
             column![
                 mouse_area(container(" ").center_x(Length::Fill).height(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::Top)))
-                .interaction(Interaction::ResizingVertically),
+                .mouse_resize_handle(Direction::Top),
                 container(" ").center(Length::Fill),
                 mouse_area(container(" ").center_x(Length::Fill).height(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::Bottom)))
-                .interaction(Interaction::ResizingVertically)
+                .mouse_resize_handle(Direction::Bottom)
             ]
             .width(Length::Fill),
             column![
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::TopRight)))
-                .interaction(Interaction::ResizingDiagonallyUp),
+                .mouse_resize_handle(Direction::TopRight),
                 mouse_area(container(" ").center_y(Length::Fill))
-                .on_press(Message::Window(WinMessage::Resize(Direction::Right)))
-                .interaction(Interaction::ResizingHorizontally),
+                .mouse_resize_handle(Direction::Right),
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .on_press(Message::Window(WinMessage::Resize(Direction::BottomRight)))
-                .interaction(Interaction::ResizingDiagonallyDown)
+                .mouse_resize_handle(Direction::BottomRight)
             ]
             .width(Length::Fixed(width.into()))
         ]
         .height(Length::Fill)
         .width(Length::Fill)
     )
+}
+
+trait ResizeHandle {
+    fn mouse_resize_handle(self, direction: Direction) -> Self;
+}
+
+impl ResizeHandle for MouseArea<'_, Message> {
+    fn mouse_resize_handle(self, direction: Direction) -> Self {
+        self
+        .on_press(Message::Window(WinMessage::ResizeStart(direction.clone())))
+        .on_move(|point| Message::Window(WinMessage::ResizeMove(point)))
+        .on_release(Message::Window(WinMessage::ResizeDone))
+        .interaction(match direction {
+            Direction::Top | Direction::Bottom => Interaction::ResizingVertically,
+            Direction::Left | Direction::Right => Interaction::ResizingHorizontally,
+            Direction::TopLeft | Direction::BottomRight => Interaction::ResizingDiagonallyDown,
+            Direction::BottomLeft | Direction::TopRight => Interaction::ResizingDiagonallyUp
+        })
+    }
 }

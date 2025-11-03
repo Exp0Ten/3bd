@@ -1,8 +1,8 @@
 use iced::{
-    Element, Task, Theme,
+    Element, Task, Theme, Point,
     application, window,
     widget::{
-        stack, column
+        column, stack
     }
 };
 
@@ -19,14 +19,16 @@ pub struct App {
 }
 
 pub struct State {
-//    panes: pane_grid::State<Pane>
-    pub maximized: bool
+    //    panes: pane_grid::State<Pane>
+    resizing: Option<Direction>,
+    pub maximized: bool,
     // add more as needed
 }
 
 impl Default for State {
     fn default() -> Self {
         State {
+            resizing: None,
             maximized: false
         }
     }
@@ -44,12 +46,15 @@ pub enum Message {
 
 #[derive(Debug, Clone)]
 pub enum WinMessage {
-    Resize(Direction),
+    ResizeStart(Direction),
+    ResizeMove(iced::Point),
+    ResizeDone,
     Close,
     Maximize,
     Restore,
     Minimize
 }
+
 
 #[derive(Debug, Clone)]
 pub enum Direction {
@@ -66,14 +71,16 @@ pub enum Direction {
 
 pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
+    //.theme(App::theme)
     .theme(App::theme)
     .window(App::default().settings)
 //    .subscription() //probably will be needed
-    .run()
+    .run_with(|| (App::default(), Task::none())) // make a function to select between default config and user modified config
 }
 
 impl App {
-    pub fn new() -> Self {
+    fn default() -> Self {
+        //config::get_app().unwrap_or(Self::new())
         Self {
             state: State::default(),
             theme: Theme::Dark,
@@ -82,10 +89,6 @@ impl App {
                 ..Default::default()
             }
         }
-    }
-
-    fn default() -> Self {
-        config::get_app().unwrap_or(Self::new())
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -108,11 +111,7 @@ impl App {
 
         let content = content(state);
 
-        // doesnt work yet, FIX
-        // if self.settings.decorations ...
-        let decorations: bool = false;
-
-        let result: Element<'_, Message> = if decorations {
+        let result: Element<'_, Message> = if self.settings.decorations {
             content.into()
         } else {
             let titlebar = titlebar(&self);
@@ -120,7 +119,7 @@ impl App {
             match state.maximized {
                 false => {
                 stack([
-                    resize_area(10).into(),
+                    resize_area(15).into(),
                     display.into()
                 ]).into()
                 }
@@ -144,6 +143,15 @@ impl App {
 
 fn window_message(app: &mut App, window: WinMessage) -> Task<Message> {
     match window {
+        WinMessage::ResizeStart(direction) => {app.state.resizing = Some(direction); Task::none()},
+        WinMessage::ResizeMove(point) => if let Some(direction) = &app.state.resizing
+            {resize(direction, point)} else {Task::none()},
+        WinMessage::ResizeDone => {app.state.resizing = None; Task::none()},
         _ => Task::none()
     }
+}
+
+fn resize(direction: &Direction, point: Point) -> Task<Message> {
+    println!("{:?}", direction);
+    Task::none()
 }
