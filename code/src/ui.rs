@@ -5,7 +5,8 @@ use iced::{
         button, column, container, mouse_area, pane_grid, row, svg, text,
         svg::{Handle, Svg}
     },
-    mouse::Interaction
+    mouse::Interaction,
+    window::Direction
 };
 
 use crate::{
@@ -114,28 +115,28 @@ pub fn resize_area<'a>(width: u8) -> Container<'a, Message> {
         row![
             column![
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::TopLeft),
+                .mouse_resize_handle(Direction::NorthWest),
                 mouse_area(container(" ").center_y(Length::Fill))
-                .mouse_resize_handle(Direction::Left),
+                .mouse_resize_handle(Direction::West),
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::BottomLeft)
+                .mouse_resize_handle(Direction::SouthWest)
                 ]
             .width(Length::Fixed(width.into())),
             column![
                 mouse_area(container(" ").center_x(Length::Fill).height(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::Top),
+                .mouse_resize_handle(Direction::North),
                 container(" ").center(Length::Fill),
                 mouse_area(container(" ").center_x(Length::Fill).height(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::Bottom)
+                .mouse_resize_handle(Direction::South)
             ]
             .width(Length::Fill),
             column![
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::TopRight),
+                .mouse_resize_handle(Direction::NorthEast),
                 mouse_area(container(" ").center_y(Length::Fill))
-                .mouse_resize_handle(Direction::Right),
+                .mouse_resize_handle(Direction::East),
                 mouse_area(container(" ").height(Length::Fixed(width.into())).width(Length::Fixed(width.into())))
-                .mouse_resize_handle(Direction::BottomRight)
+                .mouse_resize_handle(Direction::SouthEast)
             ]
             .width(Length::Fixed(width.into()))
         ]
@@ -151,14 +152,12 @@ trait ResizeHandle {
 impl ResizeHandle for MouseArea<'_, Message> {
     fn mouse_resize_handle(self, direction: Direction) -> Self {
         self
-        .on_press(Message::Window(WinMessage::ResizeStart(direction.clone())))
-        .on_move(|point| Message::Window(WinMessage::ResizeMove(point)))
-        .on_release(Message::Window(WinMessage::ResizeDone))
+        .on_press(Message::Window(WinMessage::Resize(direction.clone())))
         .interaction(match direction {
-            Direction::Top | Direction::Bottom => Interaction::ResizingVertically,
-            Direction::Left | Direction::Right => Interaction::ResizingHorizontally,
-            Direction::TopLeft | Direction::BottomRight => Interaction::ResizingDiagonallyDown,
-            Direction::BottomLeft | Direction::TopRight => Interaction::ResizingDiagonallyUp
+            Direction::North | Direction::South => Interaction::ResizingVertically,
+            Direction::West | Direction::East => Interaction::ResizingHorizontally,
+            Direction::NorthWest | Direction::SouthEast => Interaction::ResizingDiagonallyDown,
+            Direction::SouthWest | Direction::NorthEast => Interaction::ResizingDiagonallyUp
         })
     }
 }
