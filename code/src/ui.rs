@@ -1,10 +1,11 @@
 use iced::{
-    Length, Task, mouse::Interaction, 
+    Length, Task,
     widget::{
         Container, MouseArea, Row, Text, Theme,
         button, column, container, mouse_area, pane_grid, row, svg, text,
         svg::{Handle, Svg}
-    }
+    },
+    mouse::Interaction
 };
 
 use crate::{

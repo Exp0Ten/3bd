@@ -20,7 +20,7 @@ pub struct App {
 
 pub struct State {
     //    panes: pane_grid::State<Pane>
-    resizing: Option<Resize>,
+    resizing: Option<Direction>,
     pub maximized: bool,
     // add more as needed
 }
@@ -55,12 +55,8 @@ pub enum WinMessage {
     Minimize
 }
 
-struct Resize {
-    start: Option<Point>,
-    direction: Direction
-}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Direction {
     TopLeft,
     Left,
@@ -90,6 +86,7 @@ impl App {
             theme: Theme::Dark,
             settings: window::Settings {
                 decorations: false,
+                position: window::Position::Specific(Point::new(100.0, 100.0)),
                 ..Default::default()
             }
         }
@@ -148,63 +145,51 @@ impl App {
 fn window_message(app: &mut App, window: WinMessage) -> Task<Message> {
     match window {
         WinMessage::ResizeStart(direction) => {
-            app.state.resizing = Some(Resize {start: None, direction: direction.clone()}); Task::none()
+            app.state.resizing = Some(direction.clone()); Task::none()
         },
         WinMessage::ResizeMove(point) =>
-            if let Some(Resize {direction, start}) = &mut app.state.resizing {
-                match start {
-                    None => *start = Some(point),
-                    _ => {}
-                };
-                resize(direction, start.expect("why are you"), point)
-            }
-            else {Task::none()}
+            if let Some(direction) = app.state.resizing
+            {resize(direction, point)} else {Task::none()}
         ,
         WinMessage::ResizeDone => {app.state.resizing = None; Task::none()},
         _ => Task::none()
     }
 }
 
-fn resize(direction: &Direction, start: Point, point: Point) -> Task<Message> {
-
-    struct Window {
-        position: Option<Point>,
-        size: Option<Size>
+fn resize(direction: Direction, point: Point) -> Task<Message> {
+    fn create_parameter_task(direction: Direction, point: Point) -> Task<(Direction, Point, window::Id, Point, Size)> {
+        window::get_oldest().and_then(
+            |id| 
+            //window::get_position(id).map(move |position| (id, position.unwrap()))
+            window::get_position(id).map(move |position| (id, Point::new(100.0, 100.0)))
+        ).then(
+            move |(id, position)| 
+            window::get_size(id).map(move |size| (direction, point, id, position, size))
+        )
     }
 
-    impl Window {
-        fn new(position: Option<Point>, size: Option<Size>) -> Self {
-            Self{position, size}
+    fn resize_task(direction: Direction, point: Point, id: window::Id, position: Point, size: Size) -> Task<Message> {
+        let (new_size, new_position): (Size, Option<Point>) = match direction {
+            Direction::Bottom => {(
+                Size::new(size.width, point.y - position.y),
+                None
+            )}
+            _ => (size, None),
+        };
+
+        if let Some(new_position) = new_position {
+            Task::batch([
+                window::resize::<Message>(id, new_size),
+                window::move_to(id, new_position)
+            ])
+        } else {
+            window::resize(id, new_size)
         }
 
-        fn position(position: Option<Point>) -> Self {
-            Self{position, size: None}
-        }
-
-        fn size(size: Option<Size>) -> Self {
-            Self{position: None, size}
-        }
     }
 
-    window::get_latest().and_then(|id| {
-        Task::batch([
-            window::get_position(id).map(|position| Window::position(position)).collect(),
-            window::get_size(id).map(|size| Window::size(Some(size))).collect()
-        ])
-        .then(|vector| {
-            let mut window = Window::new(vector[0].position, vector[1].size);
-
-            window = match direction {
-                Direction::Bottom => {
-                    Window::size()
-                },
-            };
-
-            match window.position {
-                Some(_) => todo!(),
-                None => todo!()
-            };
-            Task::done(Message::None)
-        })
-    })
+    create_parameter_task(direction, point).then(
+        |(direction, point, id, position, size)|
+        resize_task(direction, point, id, position, size)
+    )
 }
