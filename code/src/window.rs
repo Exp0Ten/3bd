@@ -19,6 +19,7 @@ pub struct App {
 }
 
 pub struct State {
+    pub layout: Layout
     //    panes: pane_grid::State<Pane>
     // add more as needed
 }
@@ -26,6 +27,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         State {
+            layout: Layout::default()
         }
     }
 }
