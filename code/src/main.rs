@@ -13,6 +13,7 @@ mod trace;      // debugging programs (eg. backend for the ui and debug function
 mod data;       // data manipulation, reading (formatting, )
 mod config;     // handling config and setting files located in ~/.config/tbd/
 mod ui;         // user interface - communicating with user and graphics
+mod style;      // styling functions
 mod window;     // window handle
 // mod keyboard;        // keyboard shortcuts handling (in use with graphics)
 

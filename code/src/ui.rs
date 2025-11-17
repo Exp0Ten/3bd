@@ -8,7 +8,7 @@ use iced::{
 };
 
 use crate::{
-    window::*, data::*, trace::*
+    window::*, data::*, trace::*, style
 };
 
 
@@ -47,7 +47,8 @@ pub enum PaneMessage {
 
 pub fn content(state: &State) -> Container<'_, Message> {
     container(column(
-        if state.layout.status_bar {vec![
+        //if state.layout.status_bar {vec![
+        if true {vec![
             toolbar(state, 50).into(),
             main_frame(state).into(),
             statusbar(state, 20).into()
@@ -59,23 +60,24 @@ pub fn content(state: &State) -> Container<'_, Message> {
 }
 
 
-
 fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
     fn toolbar_button<'a>(icon: &str, size: f32) -> button::Button<'a, Message> {
-        button(svg(Handle::from_memory(Asset::get(icon).unwrap().data)).height(Length::Fill)).padding(4).height(size as f32).width(size as f32)
-
+        button(svg(Handle::from_memory(Asset::get(icon).unwrap().data)).height(Length::Fill).style(style::bar_svg)).padding(4).height(size as f32).width(size as f32)
     }
 
     fn buttons<'a>(state: &State, size: f32) -> [button::Button<'a, Message>; 4] {
-        let load_file = toolbar_button("icons/load_file.svg", size).on_press(Message::Operation(Operation::LoadFile));
+        let load_file = toolbar_button("icons/load_file.svg", size).on_press(Message::Operation(Operation::LoadFile)).style(style::button_normal);
+
+        // Toggle buttons:
         let sidebar_left = toolbar_button("icons/sidebar_left.svg", size).on_press(Message::None);
         let sidebar_right = toolbar_button("icons/sidebar_right.svg", size).on_press(Message::None);
         let panel = toolbar_button("icons/panel.svg", size).on_press(Message::None);
+
         [load_file, sidebar_left, sidebar_right, panel] //extend
     }
 
-    let padding = 10.;
+    let padding = 5.;
 
     let (
         load_file,
@@ -101,28 +103,29 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
     ])).height(Length::Fixed(height as f32))
     .width(Length::Fill)
     .padding(padding) //padding around the buttons
+    .style(style::bar)
 }
+
 
 fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
-    container(row([
 
-    ])).height(Length::Fixed(height as f32))
+    container(row![
+        text("Program State | Program Position | Backtrace ...").size((height-7) as f32)
+    ]).height(Length::Fixed(height as f32))
     .width(Length::Fill)
     .padding(3)
+    .style(style::bar)
 }
+
+
 
 fn main_frame<'a>(state: &State) -> Container<'a, Message> {
     container(
         ""
-    ).width(Length::Fill)
+    ).center(Length::Fill)
+    .width(Length::Fill)
     .height(Length::Fill)
 }
-
-
-
-
-
-
 
 
 
