@@ -18,7 +18,7 @@ pub struct Layout {
     sidebar_left: bool,
     sidebar_right: bool,
     panel: bool,
-    panes: pane_grid::State<Pane>
+    //panes: pane_grid::State<Pane>
 }
 
 impl Default for Layout {
@@ -28,7 +28,7 @@ impl Default for Layout {
             sidebar_left: false,
             sidebar_right: false,
             panel: false,
-            panes: pane_grid::State::with_configuration()
+            //panes: pane_grid::State::with_configuration()
         }
     }
 }
@@ -42,7 +42,7 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     Labels,
     Info, // ELF dump
     Control,
-    Terminal // maybe extrenal? well see
+    //Terminal // maybe extrenal? well see
 }
 
 #[derive(Debug, Clone)]
