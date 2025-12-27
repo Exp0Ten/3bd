@@ -65,13 +65,13 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         let state = &mut self.state;
 
-        let task: Task<Message> = match message {
-            Message::Operation(operation) => {trace::operation_message(operation); Task::none()},
+        match message {
+            Message::Operation(operation) => trace::operation_message(operation),
             Message::Pane(pane) => pane_message(state, pane),
-            _ => Task::none()
+            _ => ()
         };
 
-        task
+        Task::none()
     }
 
 

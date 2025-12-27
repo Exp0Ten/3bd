@@ -11,14 +11,13 @@ use crate::{
     window::*, data::*, trace::*, style
 };
 
-
-
 pub struct Layout {
     status_bar: bool,
     sidebar_left: bool,
     sidebar_right: bool,
     panel: bool,
-    //panes: pane_grid::State<Pane>
+    panes: pane_grid::State<Pane>,
+    _focus: Option<pane_grid::Pane>
 }
 
 impl Default for Layout {
@@ -28,29 +27,69 @@ impl Default for Layout {
             sidebar_left: false,
             sidebar_right: false,
             panel: false,
-            //panes: pane_grid::State::with_configuration()
+            panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
+                    axis: pane_grid::Axis::Horizontal,
+                    ratio: 0.,
+                    a: Box::new(pane_grid::Configuration::Pane(Pane::Registers(PaneRegisters {}))),
+                    b: Box::new(pane_grid::Configuration::Pane(Pane::Registers(PaneRegisters {})))
+                }), // implement later from toml
+            //panes: pane_grid::State::new(Pane::Registers).0,
+            _focus: None
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
-    Memory,
-    Stack,
-    Code,
-    Assembly,
-    Registers,
-    Labels,
-    Info, // ELF dump
-    Control,
-    //Terminal // maybe extrenal? well see
+    Memory(PaneMemory),
+    Stack(PaneStack),
+    Code(PaneCode),
+    Assembly(PaneAssembly),
+    Registers(PaneRegisters),
+    Variables(PaneVariables),
+    Info(PaneInfo), // ELF dump
+    Control(PaneControl),
+    Terminal(PaneTerminal)
 }
+
+#[derive(Debug, Clone)]
+struct PaneMemory {}
+
+#[derive(Debug, Clone)]
+struct PaneStack {}
+
+#[derive(Debug, Clone)]
+struct PaneCode {}
+
+#[derive(Debug, Clone)]
+struct PaneAssembly {}
+
+#[derive(Debug, Clone)]
+struct PaneRegisters {}
+
+#[derive(Debug, Clone)]
+struct PaneVariables {}
+
+#[derive(Debug, Clone)]
+struct PaneInfo {}
+
+#[derive(Debug, Clone)]
+struct PaneControl {}
+
+#[derive(Debug, Clone)]
+struct PaneTerminal {}
 
 #[derive(Debug, Clone)]
 pub enum PaneMessage {
     SidebarLeftToggle,
     SidebarRightToggle,
-    PanelToggle
+    PanelToggle,
+    _Focus(pane_grid::Pane),
+    Drag(pane_grid::DragEvent),
+    Resize(pane_grid::ResizeEvent),
 }
+
+
 
 pub fn content(state: &State) -> Container<'_, Message> {
     container(column(
@@ -65,7 +104,6 @@ pub fn content(state: &State) -> Container<'_, Message> {
         ]}
     ))
 }
-
 
 fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
@@ -129,7 +167,6 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
     .style(style::bar)
 }
 
-
 fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
     container(row![
@@ -140,36 +177,125 @@ fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
     .style(style::bar)
 }
 
-
-
-fn main_frame<'a>(state: &State) -> Container<'a, Message> {
+fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
     container(
-        ""
+        pane_grid(&state.layout.panes, pane_view).spacing(10)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .on_click(|pane| Message::Pane(PaneMessage::_Focus(pane)))
+        .on_drag(|drag_event| Message::Pane(PaneMessage::Drag(drag_event)))
+        .on_resize(10, |resize_event| Message::Pane(PaneMessage::Resize(resize_event)))
     ).center(Length::Fill)
     .width(Length::Fill)
     .height(Length::Fill)
 }
 
+fn pane_view(id: pane_grid::Pane, pane: &Pane, _maximized: bool) -> pane_grid::Content<'_, Message> {
+    let (content, titlebar) = match pane {
+        Pane::Code(state) => pane_view_code(state),
+        Pane::Control(state) => pane_view_control(state),
+        Pane::Memory(state) => pane_view_memory(state),
+        Pane::Variables(state) => pane_view_variables(state),
+        Pane::Stack(state) => pane_view_stack(state),
+        Pane::Registers(state) => pane_view_registers(state),
+        Pane::Assembly(state) => pane_view_assembly(state),
+        Pane::Terminal(state) => pane_view_terminal(state),
+        Pane::Info(state) => pane_view_info(state),
 
-
-
-
-
-
-
-pub fn pane_message(state: &mut State, pane: PaneMessage) -> Task<Message> {
-    let task: Option<Task<Message>> = match pane {
-        PaneMessage::SidebarLeftToggle => {state.layout.sidebar_left ^= true; None}
-        PaneMessage::SidebarRightToggle => {state.layout.sidebar_right ^= true; None}
-        PaneMessage::PanelToggle => {state.layout.panel ^= true; None}
-        //fill in later
-        _ => None
+        _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
     };
 
-    match task {
-        Some(task) => task,
-        None => Task::none()
-    }
+    pane_grid::Content::new(content).title_bar(titlebar)
+}
+
+fn pane_titlebar(title: &str, height: usize) -> pane_grid::TitleBar<'_, Message> {
+    pane_grid::TitleBar::new(
+        container(column![text(title), widget_fill()]).center(Length::Fill)
+        .height(Length::Fixed(height as f32))
+        .width(Length::Fill)
+        //TODO
+    )
+}
+
+fn pane_view_code<'a>(state: &PaneCode) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Code", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_control<'a>(state: &PaneControl) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Control", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_memory<'a>(state: &PaneMemory) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Memory", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_variables<'a>(state: &PaneVariables) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Variables", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_stack<'a>(state: &PaneStack) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Stack", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_registers<'a>(state: &PaneRegisters) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Registers", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_assembly<'a>(state: &PaneAssembly) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Assembly", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_terminal<'a>(state: &PaneTerminal) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Terminal", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+fn pane_view_info<'a>(state: &PaneInfo) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
+    let titlebar = pane_titlebar("Info", 10);
+    let content = todo!();
+    (content, titlebar)
+}
+
+
+
+
+//message Handle
+
+pub fn pane_message(state: &mut State, pane: PaneMessage) {
+    match pane {
+        PaneMessage::SidebarLeftToggle =>   state.layout.sidebar_left ^= true,
+        PaneMessage::SidebarRightToggle =>  state.layout.sidebar_right ^= true,
+        PaneMessage::PanelToggle =>         state.layout.panel ^= true,
+
+        PaneMessage::_Focus(pane) =>   state.layout._focus = Some(pane),
+        PaneMessage::Drag(pane_grid::DragEvent::Dropped {pane, target}) => {
+            //let target = match target {
+            //    pane_grid::Target::Pane(pane, _)
+            //    _ => ()
+            //}
+            state.layout.panes.drop(pane, target)
+        }
+        PaneMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
+            state.layout.panes.resize(split, ratio)
+        }
+        //fill in later
+        _ => ()
+    };
 }
 
 

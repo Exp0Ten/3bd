@@ -8,7 +8,8 @@
 mod test;       // for testing and debbuging
 
 // the following files go in sequence based on what they depend on (tracing need objdump, data needs trace, ui needs data ...)
-mod object;     // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it)
+mod object;     // ELF handling, reading, preparing, AND TRACING THE PROGRAM (trace.rs merily debugs it) (+ from dwarf, import source files)
+mod dwarf;      // local variables, call stack, background line tracking
 mod trace;      // debugging programs (eg. backend for the ui and debug functions)
 mod data;       // data manipulation, reading (formatting, )
 mod config;     // handling config and setting files located in ~/.config/tbd/

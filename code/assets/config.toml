@@ -1,0 +1,14 @@
+
+
+[layout]
+status_bar = true
+sidebar_left = true
+sidebar_right = true
+panel = true
+panel_mode = "middle" # "middle", "left", "right", "full"
+
+[layout.panes]
+main = ["code"] # next to each other
+left = ["control", "variables"]
+right = ["registers", "stack"]
+panel = ["terminal"]
