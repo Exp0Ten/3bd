@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use iced::{
     Task, Length,
     widget::{
-        Container, MouseArea, Row, Text, Theme,
+        Container, Row, Theme,
         button, column, container, mouse_area, pane_grid, row, svg, text,
-        svg::{Handle, Svg}
+        svg::Handle
     }
 };
 
@@ -30,8 +32,8 @@ impl Default for Layout {
             panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
                     axis: pane_grid::Axis::Horizontal,
                     ratio: 0.,
-                    a: Box::new(pane_grid::Configuration::Pane(Pane::Registers(PaneRegisters {}))),
-                    b: Box::new(pane_grid::Configuration::Pane(Pane::Registers(PaneRegisters {})))
+                    a: Box::new(pane_grid::Configuration::Pane(Pane::Info(PaneInfo {}))),
+                    b: Box::new(pane_grid::Configuration::Pane(Pane::Terminal(PaneTerminal {text: Default::default()})))
                 }), // implement later from toml
             //panes: pane_grid::State::new(Pane::Registers).0,
             _focus: None
@@ -40,7 +42,7 @@ impl Default for Layout {
 }
 
 #[derive(Debug, Clone)]
-pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
+enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
     Memory(PaneMemory),
     Stack(PaneStack),
     Code(PaneCode),
@@ -53,31 +55,69 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
 }
 
 #[derive(Debug, Clone)]
-struct PaneMemory {}
+struct PaneMemory {
+    address: u64, // where are we in memory, we read extra 1KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
+    bytes_per_row: u8, //min 4, max 16
+    binary_display: bool,
+    read_error: bool, // if read error occurs, show a button to take the user back (resets the address to a correct map)
+    _selected: Select, // TODO feature
+    _colored: HashMap<MemColor, Select>, // TODO feature
+    _changed: [bool; 1024] // TODO feature highlight changed bytes
+}
 
 #[derive(Debug, Clone)]
-struct PaneStack {}
+struct Select {
+    address: u64,
+    range: Option<u32> // option only for writing purposes
+}
 
 #[derive(Debug, Clone)]
-struct PaneCode {}
+enum MemColor {} // TODO feature
 
 #[derive(Debug, Clone)]
-struct PaneAssembly {}
+struct PaneStack {
+    function_list: Vec<FunctionInfo>
+}
 
 #[derive(Debug, Clone)]
-struct PaneRegisters {}
+struct FunctionInfo { // use matching to find what you need to calculate again (for example main gets calculated only once, becasue return from main end the program)
+    name: String,
+    pc_address: u64,
+    stack: u64,
+    return_address: u64
+}
 
 #[derive(Debug, Clone)]
-struct PaneVariables {}
+struct PaneCode {
+    source_present: bool, //whether the program found the source code files
+    filename: String,
+    line_highlight: usize,
+    language: String
+}
 
 #[derive(Debug, Clone)]
-struct PaneInfo {}
+struct PaneAssembly {
+    address: u64, // same as in mem
+    text: HashMap<u64, String>, // code disassembly
+    address_highlight: u64 // which address to highlight
+}
 
 #[derive(Debug, Clone)]
-struct PaneControl {}
+struct PaneRegisters {} //TODO
 
 #[derive(Debug, Clone)]
-struct PaneTerminal {}
+struct PaneVariables {} // TODO
+
+#[derive(Debug, Clone)]
+struct PaneInfo {} // TODO
+
+#[derive(Debug, Clone)]
+struct PaneControl {} // TODO
+
+#[derive(Debug, Clone)]
+struct PaneTerminal {
+    text: String
+}
 
 #[derive(Debug, Clone)]
 pub enum PaneMessage {
@@ -100,7 +140,7 @@ pub fn content(state: &State) -> Container<'_, Message> {
             statusbar(state, 20).into()
         ]} else {vec![
             toolbar(state, 50).into(),
-            main_frame(state).into()
+            main_frame(state).into(),
         ]}
     ))
 }
@@ -208,66 +248,67 @@ fn pane_view(id: pane_grid::Pane, pane: &Pane, _maximized: bool) -> pane_grid::C
     pane_grid::Content::new(content).title_bar(titlebar)
 }
 
-fn pane_titlebar(title: &str, height: usize) -> pane_grid::TitleBar<'_, Message> {
+fn pane_titlebar(title: &str) -> pane_grid::TitleBar<'_, Message> {
+    let height = 30;
     pane_grid::TitleBar::new(
-        container(column![text(title), widget_fill()]).center(Length::Fill)
+        text(title)
         .height(Length::Fixed(height as f32))
-        .width(Length::Fill)
+        .width(Length::Shrink)
         //TODO
     )
 }
 
 fn pane_view_code<'a>(state: &PaneCode) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Code", 10);
-    let content = todo!();
+    let titlebar = pane_titlebar("Code");
+    let content = container(text("CODE"));
     (content, titlebar)
 }
 
 fn pane_view_control<'a>(state: &PaneControl) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Control", 10);
+    let titlebar = pane_titlebar("Control");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_memory<'a>(state: &PaneMemory) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Memory", 10);
+    let titlebar = pane_titlebar("Memory");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_variables<'a>(state: &PaneVariables) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Variables", 10);
+    let titlebar = pane_titlebar("Variables");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_stack<'a>(state: &PaneStack) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Stack", 10);
+    let titlebar = pane_titlebar("Stack");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_registers<'a>(state: &PaneRegisters) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Registers", 10);
+    let titlebar = pane_titlebar("Registers");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_assembly<'a>(state: &PaneAssembly) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Assembly", 10);
+    let titlebar = pane_titlebar("Assembly");
     let content = todo!();
     (content, titlebar)
 }
 
 fn pane_view_terminal<'a>(state: &PaneTerminal) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Terminal", 10);
-    let content = todo!();
+    let titlebar = pane_titlebar("Terminal");
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
 fn pane_view_info<'a>(state: &PaneInfo) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Info", 10);
-    let content = todo!();
+    let titlebar = pane_titlebar("Info");
+    let content = container(text("INFO"));
     (content, titlebar)
 }
 
@@ -284,11 +325,11 @@ pub fn pane_message(state: &mut State, pane: PaneMessage) {
 
         PaneMessage::_Focus(pane) =>   state.layout._focus = Some(pane),
         PaneMessage::Drag(pane_grid::DragEvent::Dropped {pane, target}) => {
-            //let target = match target {
-            //    pane_grid::Target::Pane(pane, _)
-            //    _ => ()
-            //}
-            state.layout.panes.drop(pane, target)
+            match target {
+                pane_grid::Target::Pane(target_pane, _) => state.layout.panes.swap(pane, target_pane),
+                //pane_grid::Target::Edge(edge) => state.layout.panes.drop(pane, pane_grid::Target::Edge(edge))
+                _ => ()
+            };
         }
         PaneMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
             state.layout.panes.resize(split, ratio)

@@ -23,21 +23,21 @@ pub fn bar(theme: &Theme) -> container::Style {
 
 pub fn bar_svg(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
-    svg::Style { color: Some(pallete.background.weak.text) }
+    svg::Style { color: Some(pallete.background.base.text) }
 }
 
 pub fn bar_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
-    svg::Style { color: Some(pallete.background.weak.color) }
+    svg::Style { color: Some(pallete.background.base.color) }
 }
 
 
 pub fn bar_button(theme: &Theme, status: button::Status) -> button::Style {
-    let _pallete = theme.extended_palette();
+    let pallete = theme.extended_palette();
     let color = Color::TRANSPARENT;
     button::Style {
         background: match status {
-            button::Status::Hovered => Some(Background::Color(color_lighten(color, 0.6))),
+            button::Status::Hovered => Some(Background::Color(color_mix(color, pallete.background.base.text, 0.6))),
             button::Status::Pressed => Some(Background::Color(color_darken(color, 0.3))),
             _ => Some(Background::Color(color))
         },
@@ -51,10 +51,10 @@ pub fn bar_button(theme: &Theme, status: button::Status) -> button::Style {
 
 pub fn bar_button_toggled(theme: &Theme, status: button::Status) -> button::Style {
     let pallete = theme.extended_palette();
-    let color = pallete.background.weak.text;
+    let color = pallete.background.base.text;
     button::Style {
         background: match status {
-            button::Status::Hovered => Some(Background::Color(color_lighten(color, 0.6))),
+            button::Status::Hovered => Some(Background::Color(color_lighten(color, 0.3))),
             button::Status::Pressed => Some(Background::Color(color_darken(color, 0.3))),
             _ => Some(Background::Color(color))
         },
