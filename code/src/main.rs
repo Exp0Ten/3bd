@@ -20,5 +20,10 @@ mod window;     // window handle
 
 
 fn main() {
-    window::run_app().expect("Not working");
+    let d = config::Config::default();
+    let mut c = config::Config::test();
+    c.merge(d);
+    println!();
+    println!("{c:?}");
+    //window::run_app().expect("Not working");
 }

@@ -12,7 +12,8 @@ nix = {version = "0.30.1", features = ["ptrace", "signal", "process"]}
 object = "0.37.3"
 gimli = "0.32.3" # for getting DWARF info (debug info)
 
-toml = "0.9.8"
+toml = {version = "0.9.8", features = ["parse", "serde"]}
+serde = "1.0"
 rust-embed = {version = "8.8.0", features = ["include-exclude"]}
 
 #iced-x86 = "1.21.0" # disassembler (later)
