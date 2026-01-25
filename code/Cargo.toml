@@ -16,4 +16,6 @@ toml = {version = "0.9.8", features = ["parse", "serde"]}
 serde = "1.0"
 rust-embed = {version = "8.8.0", features = ["include-exclude"]}
 
+rfd = "0.17.2"
+
 #iced-x86 = "1.21.0" # disassembler (later)

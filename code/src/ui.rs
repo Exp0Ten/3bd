@@ -30,7 +30,7 @@ impl Default for Layout {
             sidebar_right: false,
             panel: false,
             panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
-                    axis: pane_grid::Axis::Horizontal,
+                    axis: pane_grid::Axis::Vertical,
                     ratio: 0.,
                     a: Box::new(pane_grid::Configuration::Pane(Pane::Info(PaneInfo {}))),
                     b: Box::new(pane_grid::Configuration::Pane(Pane::Terminal(PaneTerminal {text: Default::default()})))
@@ -147,35 +147,26 @@ pub fn content(state: &State) -> Container<'_, Message> {
 
 fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
-    fn toolbar_button<'a>(icon: &str, size: f32, svg_style: Option<fn(&Theme, svg::Status) -> svg::Style>) -> button::Button<'a, Message> {
-        button(
-            svg(Handle::from_memory(Asset::get(icon).unwrap().data))
-            .height(Length::Fill)
-            .style(svg_style.unwrap_or(style::bar_svg))
-        ).padding(4)
-        .height(size as f32)
-        .width(size as f32)
-    }
-
     fn buttons<'a>(state: &State, size: f32) -> [button::Button<'a, Message>; 4] {
-        let load_file = toolbar_button("icons/load_file.svg", size, None).on_press(Message::Operation(Operation::LoadFile)).style(style::bar_button);
+        let load_file = svg_button("icons/load_file.svg", size, None).on_press(Message::Operation(Operation::LoadFile)).style(style::bar_button);
 
         // Toggle buttons:
-        let sidebar_left = toolbar_button("icons/sidebar_left.svg", size,
+        let sidebar_left = svg_button("icons/sidebar_left.svg", size,
         Some(if state.layout.sidebar_left {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.sidebar_left {style::bar_button_toggled} else {style::bar_button})
         .on_press(Message::Pane(PaneMessage::SidebarLeftToggle));
 
-        let sidebar_right = toolbar_button("icons/sidebar_right.svg", size,
+        let sidebar_right = svg_button("icons/sidebar_right.svg", size,
         Some(if state.layout.sidebar_right {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.sidebar_right {style::bar_button_toggled} else {style::bar_button})
         .on_press(Message::Pane(PaneMessage::SidebarRightToggle));
-        let panel = toolbar_button("icons/panel.svg", size,
+
+        let panel = svg_button("icons/panel.svg", size,
         Some(if state.layout.panel {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.panel {style::bar_button_toggled} else {style::bar_button})
         .on_press(Message::Pane(PaneMessage::PanelToggle));
 
-        [load_file, sidebar_left, sidebar_right, panel] //extend
+        [load_file, sidebar_left, sidebar_right, panel] //extend if needed
     }
 
     let padding = 5.;
@@ -332,7 +323,7 @@ pub fn pane_message(state: &mut State, pane: PaneMessage) {
             };
         }
         PaneMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
-            state.layout.panes.resize(split, ratio)
+            state.layout.panes.resize(split, ratio) // TODO maybe implement limit?
         }
         //fill in later
         _ => ()
@@ -340,7 +331,17 @@ pub fn pane_message(state: &mut State, pane: PaneMessage) {
 }
 
 
-// Misc widgets
+// Widgets helpers
+
+fn svg_button<'a>(icon: &str, size: f32, svg_style: Option<fn(&Theme, svg::Status) -> svg::Style>) -> button::Button<'a, Message> {
+    button(
+        svg(Handle::from_memory(Asset::get(icon).unwrap().data))
+        .height(Length::Fill)
+        .style(svg_style.unwrap_or(style::bar_svg))
+    ).padding(4)
+    .height(size as f32)
+    .width(size as f32)
+}
 
 fn widget_fill<'a>() -> Container<'a, Message> {
     container("").width(Length::Fill).height(Length::Fill)

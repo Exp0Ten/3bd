@@ -2,16 +2,18 @@
 
 use crate::data::INTERNAL;
 
+use crate::window::Dialog;
+
 #[derive(Debug, Clone)]
 pub enum Operation {
-    NewWindow,
     LoadFile,
-    ReloadFile,
-    SaveLog,
-    OpenSettings
+    ReloadFile
     //fill as needed
 }
 
 pub fn operation_message(operation: Operation) {
-
+    match operation {
+        Operation::LoadFile => {Dialog::file(None, None);},
+        _ => ()
+    }
 }

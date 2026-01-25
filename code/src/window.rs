@@ -6,6 +6,8 @@ use iced::{
     }
 };
 
+use rfd;
+
 use crate::{
     ui::*, config, trace
 };
@@ -91,4 +93,48 @@ impl App {
         self.settings.clone()
     }
 
+}
+
+// DIALOG FUNCTIONS (those small windows when your program encounters an error, or when you wanna pick a file, you absolutely know what i mean just cant remember trust me)
+
+pub struct Dialog {} // Struct for dialog functions, and for easy export (i know i could make a module, but i dont wanna flood it with too many files, i already feel like ive got many)
+
+impl Dialog {
+    pub fn error(msg: &str, title: Option<&str>) {
+        rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .set_title(format!("Three Body Debugger - {}", title.unwrap_or("Error")))
+        .set_description(msg)
+        .show();
+    }
+
+    pub fn info(msg: &str, title: Option<&str>) {
+        rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .set_title(format!("Three Body Debugger - {}", title.unwrap_or("Info")))
+        .set_description(msg)
+        .show();
+    }
+
+    pub fn warning(msg: &str, title: Option<&str>) {
+        rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .set_title(format!("Three Body Debugger - {}", title.unwrap_or("Warning")))
+        .set_description(msg)
+        .show();
+    }
+
+    pub fn file(dir: Option<std::path::PathBuf>, file: Option<String>) -> Option<std::path::PathBuf> {
+        let dir = dir.unwrap_or(std::env::current_dir().unwrap_or("/".into()));
+        let file = file.unwrap_or("".to_string());
+
+        rfd::FileDialog::new()
+        .set_directory(dir)
+        .set_file_name(file)
+        .set_title("Select an executable to debug.")
+        .pick_file()
+    }
 }
