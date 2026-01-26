@@ -1,17 +1,16 @@
+use std::fs;
 use toml;
-
 use serde::Deserialize;
 
-use crate::window;
 use crate::data::*;
 
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     layout: Option<Layout>
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct Layout {
     status_bar: Option<bool>,
     sidebar_left: Option<bool>,
@@ -22,7 +21,7 @@ struct Layout {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 enum PanelMode {
     middle,
     left,
@@ -30,7 +29,7 @@ enum PanelMode {
     full
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct Panes {
     main: Vec<Pane>,
     left: Vec<Pane>,
@@ -39,7 +38,7 @@ struct Panes {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 enum Pane {
     memory,
     stack,
@@ -60,11 +59,6 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn test() -> Self {
-        let config: Self = toml::from_slice(&Asset::get("test.toml").unwrap().data).unwrap();
-        config
-    }
-
     pub fn merge(&mut self, default: Self) {
         // UPDATE FOR EVERY FIELD
 
@@ -105,5 +99,19 @@ impl Config {
         };
 
         //self.clone()  //derive Clone for this if needed
+    }
+}
+
+pub fn load_config() -> Config { // TODO reprogram to "if let" statements instead of match
+    let path = "$HOME/.config/tbd/config.toml";
+    match fs::read(path) {
+        Ok(file) => {
+            let config: Result<Config, toml::de::Error> = toml::from_slice(&file);
+            match config {
+                Ok(mut config) => {config.merge(Config::default()); config},
+                Err(_) => Config::default()
+            }
+        }
+        Err(_) => Config::default()
     }
 }

@@ -1,6 +1,8 @@
 use std::sync::{Mutex, MutexGuard};
 use std::path::Path;
 
+use crate::config;
+
 use rust_embed::Embed; // to run as a single file binary without the dependecy on the file system
 
 #[derive(Embed)]
@@ -9,10 +11,10 @@ use rust_embed::Embed; // to run as a single file binary without the dependecy o
 #[exclude = "*/LICENSE"]
 pub struct Asset;
 
-
-//Internal Data (for debbuging)
+//Internal Data
 #[derive(Debug, Clone)]
 pub struct Internal {
+    pub config: Option<config::Config>,
     pub file: Option<Box<Path>>,
 }
 
@@ -23,6 +25,7 @@ pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::new());
 impl Internal {
     const fn new() -> Self {
         Internal {
+            config: None,
             file: None
         }
     }
@@ -48,4 +51,8 @@ impl<'a> Glob<'a> for Mutex<Internal> {
         *self.access() = internal;
     }
 
+}
+
+fn load_internal() { //TODO
+    Glob::set(&INTERNAL,Internal { config: Some(config::load_config()), file: None });
 }
