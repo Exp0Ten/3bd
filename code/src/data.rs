@@ -1,5 +1,6 @@
 use std::sync::{Mutex, MutexGuard};
 use std::path::Path;
+use std::os::fd::RawFd;
 
 use crate::config;
 
@@ -16,17 +17,29 @@ pub struct Asset;
 pub struct Internal {
     pub config: Option<config::Config>,
     pub file: Option<Box<Path>>,
+    pub tracee_stdio: Option<(RawFd, RawFd)>
 }
 
 // Public Handle
 
-pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::new());
+pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::empty());
 
 impl Internal {
-    const fn new() -> Self {
+    const fn empty() -> Self {
         Internal {
             config: None,
-            file: None
+            file: None,
+            tracee_stdio: None
+        }
+    }
+}
+
+impl Default for Internal {
+    fn default() -> Self {
+        Internal {
+            config: Some(config::load_config()),
+            file: None,
+            tracee_stdio: None
         }
     }
 }
@@ -54,5 +67,5 @@ impl<'a> Glob<'a> for Mutex<Internal> {
 }
 
 fn load_internal() { //TODO
-    Glob::set(&INTERNAL,Internal { config: Some(config::load_config()), file: None });
+    Glob::set(&INTERNAL,Internal::default());
 }

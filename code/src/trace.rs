@@ -4,12 +4,14 @@ use std::path::PathBuf;
 use std::ffi::c_void;
 
 use nix::sys::ptrace;
+use nix::sys::signal::Signal;
 use nix::unistd::Pid;
 
 use nix::libc::user_regs_struct;
 
-use crate::data::INTERNAL;
+use crate::data::*;
 use crate::window::Dialog;
+use crate::dwarf::*;
 
 struct MapBits {
     r: bool,
@@ -84,6 +86,8 @@ fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
 
     for line in lines {
         mmap_vector.push({
+            if line == "" {continue;}
+
             let mut split = line.split_ascii_whitespace();
 
             let mut range_split: std::str::Split<'_, &str> = split.next().unwrap().split("-");
@@ -103,6 +107,8 @@ fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
             split.next();
 
             let name = split.next().unwrap_or("").to_string();
+
+            if name == "" {continue;}
 
             MemoryMap {
                 name,
@@ -149,7 +155,7 @@ fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> {
 fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> {
     match ptrace::setregs(pid, regs) {
         Ok(()) => Ok(()),
-        Err(err) => {Dialog::error(&format!("Could not ser register values: {}", err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not set register values: {}", err), Some("Trace error")); return Err(());}
     }
 }
 
@@ -178,6 +184,59 @@ fn set_register_value(pid: Pid, register: Register) -> Result<(), ()> {
 
     set_registers(pid, regs)?;
     Ok(())
+}
+
+fn kill_tracee(pid: Pid) -> Result<(), ()> {
+    match ptrace::kill(pid) {
+        Ok(()) => Ok(()),
+        Err(err) => {Dialog::error(&format!("Could not stop the tracee: {}", err), Some("Trace error")); return Err(());}
+
+    }
+}
+
+fn restart_tracee(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { //also used for signaling the tracee
+    match ptrace::cont(pid, signal) {
+        Ok(()) => Ok(()),
+        Err(err) => {Dialog::error(&format!("Could not deliver the signal to the tracee: {}", err), Some("Trace error")); return Err(());}
+    }
+}
+
+fn signal_tracee(pid: Pid, signal: Signal) -> Result<(), ()> { //WRAPPER
+    restart_tracee(pid, Some(signal))
+}
+
+fn continue_tracee(pid: Pid) -> Result<(), ()> { //WRAPPER
+    restart_tracee(pid, None)
+}
+
+fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
+    match ptrace::step(pid, signal) {
+        Ok(()) => Ok(()),
+        Err(err) => {Dialog::error(&format!("Could not step the tracee program: {}", err), Some("Trace error")); return Err(());}
+    }
+}
+
+fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a breakpoint, not over an instruction
+    remove_breakpoint(pid, rip, byte)?;
+    step(pid, None)?;
+    insert_breakpoint(pid, rip)?;
+    Ok(())
+}
+
+fn source_step(pid: Pid, byte: u8, lines: &LineAddresses) -> Result<(Register, (u64, PathBuf)), ()> { // new rip, line_number and File PathBuf
+    let mut rip = get_registers(pid)?.rip;
+
+    step_over(pid, rip, byte)?;
+
+    loop {
+        rip = get_registers(pid)?.rip;
+        if lines.dict.contains_key(&rip) {
+            return Ok((Register::RIp(rip), lines.dict[&rip].clone()));
+        } else {
+            step(pid, None)?;
+        }
+    }
+
 }
 
 //TODO implement INTERNAL
