@@ -3,6 +3,9 @@ use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 use std::ffi::c_void;
 
+use std::collections::HashMap;
+
+
 use nix::sys::ptrace;
 use nix::sys::signal::Signal;
 use nix::unistd::Pid;
@@ -13,6 +16,28 @@ use crate::data::*;
 use crate::window::Dialog;
 use crate::dwarf::*;
 use crate::object;
+
+pub type Breakpoints = HashMap<u64, u8>;
+
+pub trait ImplBreakpoints {
+    fn add(&mut self, address: u64, byte: u8);
+    fn remove(&mut self, address: u64) -> u8;
+    fn is_active(&self, address: u64) -> bool;
+}
+
+impl ImplBreakpoints for Breakpoints {
+    fn add(&mut self, address: u64, byte: u8) {
+        self.insert(address, byte);
+    }
+
+    fn remove(&mut self, address: u64) -> u8 {
+        self.remove(&address).unwrap()
+    }
+
+    fn is_active(&self, address: u64) -> bool {
+        self.contains_key(&address)
+    }
+}
 
 struct MapBits {
     r: bool,
@@ -239,8 +264,8 @@ fn source_step<'a>(pid: Pid, byte: u8, lines: &'a LineAddresses) -> Result<(Regi
 
     loop {
         rip = get_registers(pid)?.rip;
-        if lines.dict.contains_key(&rip) {
-            return Ok((Register::RIp(rip), lines.dict[&rip].clone()));
+        if lines.contains_key(&rip) {
+            return Ok((Register::RIp(rip), lines[&rip].clone()));
         } else {
             step(pid, None)?;
         }

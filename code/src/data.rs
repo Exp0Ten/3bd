@@ -3,10 +3,12 @@ use std::path;
 use std::fs;
 use std::io::{PipeReader, PipeWriter};
 
+
 use nix::unistd::Pid;
 
 use crate::config;
 use crate::dwarf;
+use crate::trace;
 
 use rust_embed::Embed; // to run as a single file binary without the dependecy on the file system
 
@@ -27,6 +29,8 @@ pub struct Internal {
     pub proc_path: Option<path::PathBuf>,
     pub memory_file: Option<fs::File>,
     pub source_files: Option<dwarf::SourceVec>,
+    pub line_addresses: Option<dwarf::LineAddresses<'static>>, //dont forget to drop this reference when changing tracee
+    pub breakpoints: Option<trace::Breakpoints>
 }
 
 // Public Handle
@@ -42,7 +46,10 @@ impl Internal {
             pid: None,
             proc_path: None,
             memory_file: None,
-            source_files: None
+            source_files: None,
+            line_addresses: None,
+            breakpoints: None
+
         }
     }
 }
@@ -56,7 +63,9 @@ impl Default for Internal {
             pid: None,
             proc_path: None,
             memory_file: None,
-            source_files: None
+            source_files: None,
+            line_addresses: None,
+            breakpoints: Some(trace::Breakpoints::new())
         }
     }
 }
@@ -68,7 +77,7 @@ pub trait Glob<'a> {
     //  add more as needed
 }
 
-impl<'a> Glob<'a> for Mutex<Internal> {
+impl <'a> Glob<'a> for Mutex<Internal> {
     fn access(&'a self) -> MutexGuard<'a, Internal> {
         self.lock().unwrap()
     }

@@ -7,10 +7,10 @@ edition = "2024"
 iced = {version = "0.13.1", features = ["svg"]}
 nix = {version = "0.30.1", features = ["ptrace", "signal", "process"]}
 
-#libc = "0.2.174"  #maybe use instead of nix, depends on if nix is gonna play along or not
+#libc = "0.2.174"  # maybe use instead of nix, depends on if nix is gonna play along or not
 
 object = "0.37.3"
-gimli = "0.32.3" # for getting DWARF info (debug info)
+gimli = "0.33.0" # for getting DWARF info (debug info)
 
 toml = {version = "0.9.8", features = ["parse", "serde"]}
 serde = "1.0"
@@ -18,4 +18,4 @@ rust-embed = {version = "8.8.0", features = ["include-exclude"]}
 
 rfd = "0.17.2"
 
-#iced-x86 = "1.21.0" # disassembler (later)
+#iced-x86 = "1.21.0" # disassembler (soon)
