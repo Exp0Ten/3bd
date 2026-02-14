@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 use std::ffi::c_void;
 
@@ -12,6 +12,7 @@ use nix::libc::user_regs_struct;
 use crate::data::*;
 use crate::window::Dialog;
 use crate::dwarf::*;
+use crate::object;
 
 struct MapBits {
     r: bool,
@@ -56,16 +57,22 @@ pub enum Operation {
 
 pub fn operation_message(operation: Operation) {
     match operation {
-        Operation::LoadFile => {Dialog::file(None, None);},
+        Operation::LoadFile => {Dialog::file(None, None);}, //TODO async
         _ => ()
     }
 }
+
+
 
 fn open_memory(proc_path: &mut PathBuf) -> Result<File, ()> {
     match File::open({proc_path.push("mem"); proc_path}) {
         Ok(file) => Ok(file),
         Err(err) => {Dialog::error(&format!("Could not open memory of the tracee: {}", err), Some("Trace Error")); Err(())}
     }
+}
+
+fn close_memory() {
+    INTERNAL.access().memory_file = None;
 }
 
 fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
@@ -129,7 +136,7 @@ fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> {
 
     match ptrace::write(pid, address as *mut c_void, (0xcc | (save & 0xff00)).into()) {
         Ok(()) => Ok((save & 0xff) as u8),
-        Err(err) => {Dialog::error(&format!("Could not insert breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not insert breakpoint at {}: {}", address, err), Some("Trace error")); Err(())}
     }
 }
 
@@ -141,21 +148,21 @@ fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
 
     match ptrace::write(pid, address as *mut c_void, (byte as u16 | (save & 0xff00)).into()) {
         Ok(()) => Ok(()),
-        Err(err) => {Dialog::error(&format!("Could not remove breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not remove breakpoint at {}: {}", address, err), Some("Trace error")); Err(())}
     }
 }
 
 fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> {
     match ptrace::getregs(pid) {
         Ok(regs) => Ok(regs),
-        Err(err) => {Dialog::error(&format!("Could not get register values: {}", err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not get register values: {}", err), Some("Trace error")); Err(())}
     }
 }
 
 fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> {
     match ptrace::setregs(pid, regs) {
         Ok(()) => Ok(()),
-        Err(err) => {Dialog::error(&format!("Could not set register values: {}", err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not set register values: {}", err), Some("Trace error")); Err(())}
     }
 }
 
@@ -186,18 +193,20 @@ fn set_register_value(pid: Pid, register: Register) -> Result<(), ()> {
     Ok(())
 }
 
-fn kill_tracee(pid: Pid) -> Result<(), ()> {
+fn kill_tracee(pid: Pid) -> Result<Option<String>, ()> {
+    close_memory();
     match ptrace::kill(pid) {
-        Ok(()) => Ok(()),
+        Ok(()) => (),
         Err(err) => {Dialog::error(&format!("Could not stop the tracee: {}", err), Some("Trace error")); return Err(());}
+    };
 
-    }
+    Ok(object::close_child_stdio())
 }
 
 fn restart_tracee(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { //also used for signaling the tracee
     match ptrace::cont(pid, signal) {
         Ok(()) => Ok(()),
-        Err(err) => {Dialog::error(&format!("Could not deliver the signal to the tracee: {}", err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not deliver the signal to the tracee: {}", err), Some("Trace error")); Err(())}
     }
 }
 
@@ -212,7 +221,7 @@ fn continue_tracee(pid: Pid) -> Result<(), ()> { //WRAPPER
 fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
     match ptrace::step(pid, signal) {
         Ok(()) => Ok(()),
-        Err(err) => {Dialog::error(&format!("Could not step the tracee program: {}", err), Some("Trace error")); return Err(());}
+        Err(err) => {Dialog::error(&format!("Could not step the tracee program: {}", err), Some("Trace error")); Err(())}
     }
 }
 
@@ -223,7 +232,7 @@ fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a b
     Ok(())
 }
 
-fn source_step(pid: Pid, byte: u8, lines: &LineAddresses) -> Result<(Register, (u64, PathBuf)), ()> { // new rip, line_number and File PathBuf
+fn source_step<'a>(pid: Pid, byte: u8, lines: &'a LineAddresses) -> Result<(Register, (usize, &'a SourceFile)), ()> { // new rip, line_number and File PathBuf
     let mut rip = get_registers(pid)?.rip;
 
     step_over(pid, rip, byte)?;
@@ -236,7 +245,40 @@ fn source_step(pid: Pid, byte: u8, lines: &LineAddresses) -> Result<(Register, (
             step(pid, None)?;
         }
     }
+}
 
+fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> {
+    match memory_file.seek(std::io::SeekFrom::Start(address)) {
+        Ok(_) => Ok(()),
+        Err(err) => {Dialog::error(&format!("Could not seek into the memory file: {}", err), Some("Memory error")); Err(())}
+    }
+}
+
+fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
+    let mut internal = INTERNAL.access();
+    let mut memory = internal.memory_file.as_mut().unwrap();
+    let mut buf: Vec<u8> = Vec::with_capacity(amount);
+
+    seek_memory(address, &mut memory);
+
+    match memory.read_exact(&mut buf) {
+        Ok(()) => (),
+        Err(err) => {Dialog::error(&format!("Could not read from the memory file: {}", err), Some("Memory error")); return Err(());}
+    };
+
+    Ok(buf)
+}
+
+fn write_memory(address: u64, buf: &[u8]) -> Result<(), ()> {
+    let mut internal = INTERNAL.access();
+    let mut memory = internal.memory_file.as_mut().unwrap();
+
+    seek_memory(address, &mut memory);
+
+    match memory.write_all(buf) {
+        Ok(_) => Ok(()),
+        Err(err) => {Dialog::error(&format!("Could not seek into the memory file: {}", err), Some("Memory error")); Err(())}
+    }
 }
 
 //TODO implement INTERNAL

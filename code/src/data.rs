@@ -1,8 +1,12 @@
 use std::sync::{Mutex, MutexGuard};
-use std::path::Path;
-use std::os::fd::RawFd;
+use std::path;
+use std::fs;
+use std::io::{PipeReader, PipeWriter};
+
+use nix::unistd::Pid;
 
 use crate::config;
+use crate::dwarf;
 
 use rust_embed::Embed; // to run as a single file binary without the dependecy on the file system
 
@@ -13,11 +17,16 @@ use rust_embed::Embed; // to run as a single file binary without the dependecy o
 pub struct Asset;
 
 //Internal Data
-#[derive(Debug, Clone)]
+//#[derive(Debug)]
+//#![allow(unused)] // if needed
 pub struct Internal {
     pub config: Option<config::Config>,
-    pub file: Option<Box<Path>>,
-    pub tracee_stdio: Option<(RawFd, RawFd)>
+    pub file: Option<Box<path::Path>>,
+    pub tracee_stdio: Option<(PipeWriter, PipeReader)>, // stdin writer, and stdout reader
+    pub pid: Option<Pid>,
+    pub proc_path: Option<path::PathBuf>,
+    pub memory_file: Option<fs::File>,
+    pub source_files: Option<dwarf::SourceVec>,
 }
 
 // Public Handle
@@ -29,7 +38,11 @@ impl Internal {
         Internal {
             config: None,
             file: None,
-            tracee_stdio: None
+            tracee_stdio: None,
+            pid: None,
+            proc_path: None,
+            memory_file: None,
+            source_files: None
         }
     }
 }
@@ -39,14 +52,18 @@ impl Default for Internal {
         Internal {
             config: Some(config::load_config()),
             file: None,
-            tracee_stdio: None
+            tracee_stdio: None,
+            pid: None,
+            proc_path: None,
+            memory_file: None,
+            source_files: None
         }
     }
 }
 
 pub trait Glob<'a> {
     fn access(&'a self) -> MutexGuard<'a, Internal>;
-    fn get(&'a self) -> Internal;
+//    fn get(&'a self) -> Internal;
     fn set(&'a self, internal: Internal);
     //  add more as needed
 }
@@ -56,9 +73,9 @@ impl<'a> Glob<'a> for Mutex<Internal> {
         self.lock().unwrap()
     }
 
-    fn get(&'a self) -> Internal {
-        self.access().clone()
-    }
+//    fn get(&'a self) -> Internal {
+//        self.access().clone()
+//    }
 
     fn set(&'a self, internal: Internal) {
         *self.access() = internal;

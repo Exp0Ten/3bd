@@ -1,9 +1,10 @@
 use std::path::Path;
-use std::os::fd::RawFd;
-use std::os::fd::FromRawFd;
 use std::process;
 use std::process::Stdio;
 use std::os::unix::{process::CommandExt, fs::MetadataExt};
+
+use std::io::pipe;
+use std::io::{PipeReader, PipeWriter, Read};
 
 use nix::sys::ptrace;
 use nix::unistd::{fork, ForkResult};
@@ -12,14 +13,12 @@ use crate::window::Dialog;
 use crate::data::*;
 
 
-pub fn run_tracee(file: &Path, args: Vec<String>) -> Result<i32, i32> {
+pub fn run_tracee(file: &Path, args: Vec<String>, pipe_stdio: (PipeReader, PipeWriter)) -> Result<i32, i32> {
 
-    let stdio_tup: (RawFd, RawFd) = INTERNAL.get().tracee_stdio.unwrap();
-
-    let stdio = unsafe {(
-        Stdio::from_raw_fd(stdio_tup.0),
-        Stdio::from_raw_fd(stdio_tup.1),
-    )};
+    let stdio = (
+        Stdio::from(pipe_stdio.0),
+        Stdio::from(pipe_stdio.1),
+    );
 
     match unsafe {fork()} {
         Ok(ForkResult::Parent { child }) => Ok(child.into()),
@@ -62,4 +61,36 @@ fn test_file(file: &Path) -> Result<(), ()> { // True if it has DWARF, False if 
     };
 
     Ok(())
+}
+
+pub fn open_child_stdio() -> Result<(PipeReader, PipeWriter), ()> { //returns the stdio pipe reader and writer for the TRACEE, and sets the Internal global stdio for the TRACER
+    let stdin_pipe = match pipe() {
+        Ok(pipe) => pipe,
+        Err(err) => {Dialog::error(&format!("Could not open pipe: {}", err), Some("Trace error")); return Err(());}
+    };
+    let stdout_pipe = match pipe() {
+        Ok(pipe) => pipe,
+        Err(err) => {Dialog::error(&format!("Could not open pipe: {}", err), Some("Trace error")); return Err(());}
+    };
+
+    INTERNAL.access().tracee_stdio = Some((stdin_pipe.1, stdout_pipe.0));
+
+    Ok((stdin_pipe.0, stdout_pipe.1))
+}
+
+pub fn close_child_stdio() -> Option<String> { // returns what was left in the pipes, should be empty, errors on none empty
+    let mut internal = INTERNAL.access();
+
+    let (stdin, stdout) = internal.tracee_stdio.as_mut().unwrap();
+    let mut text = String::new();
+
+    let _ = stdout.read_to_string(&mut text);
+    internal.tracee_stdio = None;
+
+    if text == "" {
+        None
+    } else {
+        Some(text)
+    }
+    // TODO, CHECK IF PIPES GET CLOSED !!!!!!!!!!!!!!!!!
 }
