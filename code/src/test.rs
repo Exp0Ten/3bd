@@ -39,6 +39,7 @@ pub fn test() {
     let dwarf = load_dwarf(&dwarf_sections, endian);
 
     dwarf_info(dwarf);
+
 }
 
 use gimli::read;

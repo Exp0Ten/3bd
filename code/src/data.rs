@@ -28,8 +28,9 @@ pub struct Internal {
     pub pid: Option<Pid>,
     pub proc_path: Option<path::PathBuf>,
     pub memory_file: Option<fs::File>,
-    pub source_files: Option<dwarf::SourceVec>,
-    pub line_addresses: Option<dwarf::LineAddresses<'static>>, //dont forget to drop this reference when changing tracee
+    pub dwarf: Option<dwarf::DwarfSections<'static>>,
+    pub source_files: Option<dwarf::SourceMap>,
+    pub line_addresses: Option<dwarf::LineAddresses>, //dont forget to drop this reference when changing tracee
     pub breakpoints: Option<trace::Breakpoints>
 }
 
@@ -46,6 +47,7 @@ impl Internal {
             pid: None,
             proc_path: None,
             memory_file: None,
+            dwarf: None,
             source_files: None,
             line_addresses: None,
             breakpoints: None
@@ -62,6 +64,7 @@ impl Default for Internal {
             tracee_stdio: None,
             pid: None,
             proc_path: None,
+            dwarf: None,
             memory_file: None,
             source_files: None,
             line_addresses: None,

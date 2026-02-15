@@ -1,0 +1,420 @@
+Contents of the .eh_frame section:
+
+
+00000000 0000000000000014 00000000 CIE
+  Version:               1
+  Augmentation:          "zR"
+  Code alignment factor: 1
+  Data alignment factor: -8
+  Return address column: 16
+  Augmentation data:     1b
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_offset: r16 (rip) at cfa-8
+  DW_CFA_undefined: r16 (rip)
+
+00000018 0000000000000014 0000001c FDE cie=00000000 pc=0000000000001040..0000000000001062
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000030 0000000000000014 00000000 CIE
+  Version:               1
+  Augmentation:          "zR"
+  Code alignment factor: 1
+  Data alignment factor: -8
+  Return address column: 16
+  Augmentation data:     1b
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_offset: r16 (rip) at cfa-8
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000048 0000000000000024 0000001c FDE cie=00000030 pc=0000000000001020..0000000000001030
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_advance_loc: 6 to 0000000000001026
+  DW_CFA_def_cfa_offset: 24
+  DW_CFA_advance_loc: 10 to 0000000000001030
+  DW_CFA_def_cfa_expression (DW_OP_breg7 (rsp): 8; DW_OP_breg16 (rip): 0; DW_OP_lit15; DW_OP_and; DW_OP_lit11; DW_OP_ge; DW_OP_lit3; DW_OP_shl; DW_OP_plus)
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000070 0000000000000014 00000044 FDE cie=00000030 pc=0000000000001030..0000000000001038
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+00000088 000000000000001c 0000005c FDE cie=00000030 pc=0000000000001129..000000000000115d
+  DW_CFA_advance_loc: 1 to 000000000000112a
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 000000000000112d
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_advance_loc: 47 to 000000000000115c
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+000000a8 000000000000001c 0000007c FDE cie=00000030 pc=000000000000115d..0000000000001171
+  DW_CFA_advance_loc: 1 to 000000000000115e
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_offset: r6 (rbp) at cfa-16
+  DW_CFA_advance_loc: 3 to 0000000000001161
+  DW_CFA_def_cfa_register: r6 (rbp)
+  DW_CFA_advance_loc: 15 to 0000000000001170
+  DW_CFA_def_cfa: r7 (rsp) ofs 8
+  DW_CFA_nop
+  DW_CFA_nop
+  DW_CFA_nop
+
+000000c8 ZERO terminator
+
+
+Contents of the .debug_aranges section:
+
+  Length:                   44
+  Version:                  2
+  Offset into .debug_info:  0
+  Pointer Size:             8
+  Segment Size:             0
+
+    Address            Length
+    0000000000001129 0000000000000034
+    0000000000000000 0000000000000000
+  Length:                   44
+  Version:                  2
+  Offset into .debug_info:  0x88
+  Pointer Size:             8
+  Segment Size:             0
+
+    Address            Length
+    000000000000115d 0000000000000014
+    0000000000000000 0000000000000000
+
+Contents of the .debug_info section:
+
+  Compilation Unit @ offset 0:
+   Length:        0x84 (32-bit)
+   Version:       5
+   Unit Type:     DW_UT_compile (1)
+   Abbrev Offset: 0
+   Pointer Size:  8
+ <0><c>: Abbrev Number: 2 (DW_TAG_compile_unit)
+    <d>   DW_AT_producer    : (indirect string, offset: 0x5): GNU C17 12.2.0 -mtune=generic -march=x86-64 -g -fasynchronous-unwind-tables
+    <11>   DW_AT_language    : 29	(C11)
+    <12>   DW_AT_name        : (indirect line string, offset: 0): main.c
+    <16>   DW_AT_comp_dir    : (indirect line string, offset: 0x7): /home/azi/debug/test/languages/c
+    <1a>   DW_AT_low_pc      : 0x1129
+    <22>   DW_AT_high_pc     : 0x34
+    <2a>   DW_AT_stmt_list   : 0
+ <1><2e>: Abbrev Number: 3 (DW_TAG_subprogram)
+    <2f>   DW_AT_external    : 1
+    <2f>   DW_AT_name        : (indirect string, offset: 0): plus
+    <33>   DW_AT_decl_file   : 2
+    <34>   DW_AT_decl_line   : 3
+    <35>   DW_AT_decl_column : 5
+    <36>   DW_AT_type        : <0x40>
+    <3a>   DW_AT_declaration : 1
+    <3a>   DW_AT_sibling     : <0x40>
+ <2><3e>: Abbrev Number: 4 (DW_TAG_unspecified_parameters)
+ <2><3f>: Abbrev Number: 0
+ <1><40>: Abbrev Number: 5 (DW_TAG_base_type)
+    <41>   DW_AT_byte_size   : 4
+    <42>   DW_AT_encoding    : 5	(signed)
+    <43>   DW_AT_name        : int
+ <1><47>: Abbrev Number: 6 (DW_TAG_subprogram)
+    <48>   DW_AT_external    : 1
+    <48>   DW_AT_name        : (indirect string, offset: 0x51): main
+    <4c>   DW_AT_decl_file   : 1
+    <4d>   DW_AT_decl_line   : 3
+    <4e>   DW_AT_decl_column : 5
+    <4f>   DW_AT_type        : <0x40>
+    <53>   DW_AT_low_pc      : 0x1129
+    <5b>   DW_AT_high_pc     : 0x34
+    <63>   DW_AT_frame_base  : 1 byte block: 9c 	(DW_OP_call_frame_cfa)
+    <65>   DW_AT_call_all_tail_calls: 1
+ <2><65>: Abbrev Number: 1 (DW_TAG_variable)
+    <66>   DW_AT_name        : a
+    <68>   DW_AT_decl_file   : 1
+    <68>   DW_AT_decl_line   : 4
+    <69>   DW_AT_decl_column : 9
+    <69>   DW_AT_type        : <0x40>
+    <6d>   DW_AT_location    : 2 byte block: 91 6c 	(DW_OP_fbreg: -20)
+ <2><70>: Abbrev Number: 1 (DW_TAG_variable)
+    <71>   DW_AT_name        : b
+    <73>   DW_AT_decl_file   : 1
+    <73>   DW_AT_decl_line   : 5
+    <74>   DW_AT_decl_column : 9
+    <74>   DW_AT_type        : <0x40>
+    <78>   DW_AT_location    : 2 byte block: 91 68 	(DW_OP_fbreg: -24)
+ <2><7b>: Abbrev Number: 1 (DW_TAG_variable)
+    <7c>   DW_AT_name        : c
+    <7e>   DW_AT_decl_file   : 1
+    <7e>   DW_AT_decl_line   : 6
+    <7f>   DW_AT_decl_column : 9
+    <7f>   DW_AT_type        : <0x40>
+    <83>   DW_AT_location    : 2 byte block: 91 64 	(DW_OP_fbreg: -28)
+ <2><86>: Abbrev Number: 0
+ <1><87>: Abbrev Number: 0
+  Compilation Unit @ offset 0x88:
+   Length:        0x69 (32-bit)
+   Version:       5
+   Unit Type:     DW_UT_compile (1)
+   Abbrev Offset: 0x65
+   Pointer Size:  8
+ <0><94>: Abbrev Number: 2 (DW_TAG_compile_unit)
+    <95>   DW_AT_producer    : (indirect string, offset: 0x5): GNU C17 12.2.0 -mtune=generic -march=x86-64 -g -fasynchronous-unwind-tables
+    <99>   DW_AT_language    : 29	(C11)
+    <9a>   DW_AT_name        : (indirect line string, offset: 0x30): other.c
+    <9e>   DW_AT_comp_dir    : (indirect line string, offset: 0x7): /home/azi/debug/test/languages/c
+    <a2>   DW_AT_low_pc      : 0x115d
+    <aa>   DW_AT_high_pc     : 0x14
+    <b2>   DW_AT_stmt_list   : 0x59
+ <1><b6>: Abbrev Number: 3 (DW_TAG_subprogram)
+    <b7>   DW_AT_external    : 1
+    <b7>   DW_AT_name        : (indirect string, offset: 0): plus
+    <bb>   DW_AT_decl_file   : 1
+    <bc>   DW_AT_decl_line   : 3
+    <bd>   DW_AT_decl_column : 5
+    <be>   DW_AT_type        : <0xed>
+    <c2>   DW_AT_low_pc      : 0x115d
+    <ca>   DW_AT_high_pc     : 0x14
+    <d2>   DW_AT_frame_base  : 1 byte block: 9c 	(DW_OP_call_frame_cfa)
+    <d4>   DW_AT_call_all_calls: 1
+    <d4>   DW_AT_sibling     : <0xed>
+ <2><d8>: Abbrev Number: 1 (DW_TAG_formal_parameter)
+    <d9>   DW_AT_name        : a
+    <db>   DW_AT_decl_file   : 1
+    <db>   DW_AT_decl_line   : 3
+    <db>   DW_AT_decl_column : 5
+    <db>   DW_AT_type        : <0xed>
+    <df>   DW_AT_location    : 2 byte block: 91 6c 	(DW_OP_fbreg: -20)
+ <2><e2>: Abbrev Number: 1 (DW_TAG_formal_parameter)
+    <e3>   DW_AT_name        : b
+    <e5>   DW_AT_decl_file   : 1
+    <e5>   DW_AT_decl_line   : 3
+    <e5>   DW_AT_decl_column : 5
+    <e5>   DW_AT_type        : <0xed>
+    <e9>   DW_AT_location    : 2 byte block: 91 68 	(DW_OP_fbreg: -24)
+ <2><ec>: Abbrev Number: 0
+ <1><ed>: Abbrev Number: 4 (DW_TAG_base_type)
+    <ee>   DW_AT_byte_size   : 4
+    <ef>   DW_AT_encoding    : 5	(signed)
+    <f0>   DW_AT_name        : int
+ <1><f4>: Abbrev Number: 0
+
+Contents of the .debug_abbrev section:
+
+  Number TAG (0)
+   1      DW_TAG_variable    [no children]
+    DW_AT_name         DW_FORM_string
+    DW_AT_decl_file    DW_FORM_implicit_const: 1
+    DW_AT_decl_line    DW_FORM_data1
+    DW_AT_decl_column  DW_FORM_implicit_const: 9
+    DW_AT_type         DW_FORM_ref4
+    DW_AT_location     DW_FORM_exprloc
+    DW_AT value: 0     DW_FORM value: 0
+   2      DW_TAG_compile_unit    [has children]
+    DW_AT_producer     DW_FORM_strp
+    DW_AT_language     DW_FORM_data1
+    DW_AT_name         DW_FORM_line_strp
+    DW_AT_comp_dir     DW_FORM_line_strp
+    DW_AT_low_pc       DW_FORM_addr
+    DW_AT_high_pc      DW_FORM_data8
+    DW_AT_stmt_list    DW_FORM_sec_offset
+    DW_AT value: 0     DW_FORM value: 0
+   3      DW_TAG_subprogram    [has children]
+    DW_AT_external     DW_FORM_flag_present
+    DW_AT_name         DW_FORM_strp
+    DW_AT_decl_file    DW_FORM_data1
+    DW_AT_decl_line    DW_FORM_data1
+    DW_AT_decl_column  DW_FORM_data1
+    DW_AT_type         DW_FORM_ref4
+    DW_AT_declaration  DW_FORM_flag_present
+    DW_AT_sibling      DW_FORM_ref4
+    DW_AT value: 0     DW_FORM value: 0
+   4      DW_TAG_unspecified_parameters    [no children]
+    DW_AT value: 0     DW_FORM value: 0
+   5      DW_TAG_base_type    [no children]
+    DW_AT_byte_size    DW_FORM_data1
+    DW_AT_encoding     DW_FORM_data1
+    DW_AT_name         DW_FORM_string
+    DW_AT value: 0     DW_FORM value: 0
+   6      DW_TAG_subprogram    [has children]
+    DW_AT_external     DW_FORM_flag_present
+    DW_AT_name         DW_FORM_strp
+    DW_AT_decl_file    DW_FORM_data1
+    DW_AT_decl_line    DW_FORM_data1
+    DW_AT_decl_column  DW_FORM_data1
+    DW_AT_type         DW_FORM_ref4
+    DW_AT_low_pc       DW_FORM_addr
+    DW_AT_high_pc      DW_FORM_data8
+    DW_AT_frame_base   DW_FORM_exprloc
+    DW_AT_call_all_tail_calls DW_FORM_flag_present
+    DW_AT value: 0     DW_FORM value: 0
+  Number TAG (0x65)
+   1      DW_TAG_formal_parameter    [no children]
+    DW_AT_name         DW_FORM_string
+    DW_AT_decl_file    DW_FORM_implicit_const: 1
+    DW_AT_decl_line    DW_FORM_implicit_const: 3
+    DW_AT_decl_column  DW_FORM_implicit_const: 5
+    DW_AT_type         DW_FORM_ref4
+    DW_AT_location     DW_FORM_exprloc
+    DW_AT value: 0     DW_FORM value: 0
+   2      DW_TAG_compile_unit    [has children]
+    DW_AT_producer     DW_FORM_strp
+    DW_AT_language     DW_FORM_data1
+    DW_AT_name         DW_FORM_line_strp
+    DW_AT_comp_dir     DW_FORM_line_strp
+    DW_AT_low_pc       DW_FORM_addr
+    DW_AT_high_pc      DW_FORM_data8
+    DW_AT_stmt_list    DW_FORM_sec_offset
+    DW_AT value: 0     DW_FORM value: 0
+   3      DW_TAG_subprogram    [has children]
+    DW_AT_external     DW_FORM_flag_present
+    DW_AT_name         DW_FORM_strp
+    DW_AT_decl_file    DW_FORM_data1
+    DW_AT_decl_line    DW_FORM_data1
+    DW_AT_decl_column  DW_FORM_data1
+    DW_AT_type         DW_FORM_ref4
+    DW_AT_low_pc       DW_FORM_addr
+    DW_AT_high_pc      DW_FORM_data8
+    DW_AT_frame_base   DW_FORM_exprloc
+    DW_AT_call_all_calls DW_FORM_flag_present
+    DW_AT_sibling      DW_FORM_ref4
+    DW_AT value: 0     DW_FORM value: 0
+   4      DW_TAG_base_type    [no children]
+    DW_AT_byte_size    DW_FORM_data1
+    DW_AT_encoding     DW_FORM_data1
+    DW_AT_name         DW_FORM_string
+    DW_AT value: 0     DW_FORM value: 0
+
+Raw dump of debug contents of section .debug_line:
+
+  Offset:                      0
+  Length:                      85
+  DWARF Version:               5
+  Address size (bytes):        8
+  Segment selector (bytes):    0
+  Prologue Length:             47
+  Minimum Instruction Length:  1
+  Maximum Ops per Instruction: 1
+  Initial value of 'is_stmt':  1
+  Line Base:                   -5
+  Line Range:                  14
+  Opcode Base:                 13
+
+ Opcodes:
+  Opcode 1 has 0 args
+  Opcode 2 has 1 arg
+  Opcode 3 has 1 arg
+  Opcode 4 has 1 arg
+  Opcode 5 has 1 arg
+  Opcode 6 has 0 args
+  Opcode 7 has 0 args
+  Opcode 8 has 0 args
+  Opcode 9 has 1 arg
+  Opcode 10 has 0 args
+  Opcode 11 has 0 args
+  Opcode 12 has 1 arg
+
+ The Directory Table (offset 0x22, lines 1, columns 1):
+  Entry	Name
+  0	(indirect line string, offset: 0x7): /home/azi/debug/test/languages/c
+
+ The File Name Table (offset 0x2c, lines 3, columns 2):
+  Entry	Dir	Name
+  0	0	(indirect line string, offset: 0): main.c
+  1	0	(indirect line string, offset: 0): main.c
+  2	0	(indirect line string, offset: 0x28): other.h
+
+ Line Number Statements:
+  [0x0000003b]  Set column to 12
+  [0x0000003d]  Extended opcode 2: set Address to 0x1129
+  [0x00000048]  Special opcode 7: advance Address by 0 to 0x1129 and Line by 2 to 3
+  [0x00000049]  Set column to 9
+  [0x0000004b]  Special opcode 118: advance Address by 8 to 0x1131 and Line by 1 to 4
+  [0x0000004c]  Special opcode 104: advance Address by 7 to 0x1138 and Line by 1 to 5
+  [0x0000004d]  Set column to 13
+  [0x0000004f]  Special opcode 104: advance Address by 7 to 0x113f and Line by 1 to 6
+  [0x00000050]  Set column to 1
+  [0x00000052]  Advance PC by constant 17 to 0x1150
+  [0x00000053]  Special opcode 160: advance Address by 11 to 0x115b and Line by 1 to 7
+  [0x00000054]  Advance PC by 2 to 0x115d
+  [0x00000056]  Extended opcode 1: End of Sequence
+
+
+  Offset:                      0x59
+  Length:                      75
+  DWARF Version:               5
+  Address size (bytes):        8
+  Segment selector (bytes):    0
+  Prologue Length:             42
+  Minimum Instruction Length:  1
+  Maximum Ops per Instruction: 1
+  Initial value of 'is_stmt':  1
+  Line Base:                   -5
+  Line Range:                  14
+  Opcode Base:                 13
+
+ Opcodes:
+  Opcode 1 has 0 args
+  Opcode 2 has 1 arg
+  Opcode 3 has 1 arg
+  Opcode 4 has 1 arg
+  Opcode 5 has 1 arg
+  Opcode 6 has 0 args
+  Opcode 7 has 0 args
+  Opcode 8 has 0 args
+  Opcode 9 has 1 arg
+  Opcode 10 has 0 args
+  Opcode 11 has 0 args
+  Opcode 12 has 1 arg
+
+ The Directory Table (offset 0x7b, lines 1, columns 1):
+  Entry	Name
+  0	(indirect line string, offset: 0x7): /home/azi/debug/test/languages/c
+
+ The File Name Table (offset 0x85, lines 2, columns 2):
+  Entry	Dir	Name
+  0	0	(indirect line string, offset: 0x30): other.c
+  1	0	(indirect line string, offset: 0x30): other.c
+
+ Line Number Statements:
+  [0x0000008f]  Set column to 16
+  [0x00000091]  Extended opcode 2: set Address to 0x115d
+  [0x0000009c]  Special opcode 7: advance Address by 0 to 0x115d and Line by 2 to 3
+  [0x0000009d]  Set column to 14
+  [0x0000009f]  Special opcode 146: advance Address by 10 to 0x1167 and Line by 1 to 4
+  [0x000000a0]  Set column to 1
+  [0x000000a2]  Special opcode 118: advance Address by 8 to 0x116f and Line by 1 to 5
+  [0x000000a3]  Advance PC by 2 to 0x1171
+  [0x000000a5]  Extended opcode 1: End of Sequence
+
+
+Contents of the .debug_str section:
+
+  0x00000000 706c7573 00474e55 20433137 2031322e plus.GNU C17 12.
+  0x00000010 322e3020 2d6d7475 6e653d67 656e6572 2.0 -mtune=gener
+  0x00000020 6963202d 6d617263 683d7838 362d3634 ic -march=x86-64
+  0x00000030 202d6720 2d666173 796e6368 726f6e6f  -g -fasynchrono
+  0x00000040 75732d75 6e77696e 642d7461 626c6573 us-unwind-tables
+  0x00000050 006d6169 6e00                       .main.
+
+Contents of the .debug_line_str section:
+
+  0x00000000 6d61696e 2e63002f 686f6d65 2f617a69 main.c./home/azi
+  0x00000010 2f646562 75672f74 6573742f 6c616e67 /debug/test/lang
+  0x00000020 75616765 732f6300 6f746865 722e6800 uages/c.other.h.
+  0x00000030 6f746865 722e6300                   other.c.
+

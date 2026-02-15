@@ -3,6 +3,11 @@ use std::process;
 use std::process::Stdio;
 use std::os::unix::{process::CommandExt, fs::MetadataExt};
 
+
+use std::fs;
+
+use object::File;
+
 use std::io::pipe;
 use std::io::{PipeReader, PipeWriter, Read};
 
@@ -94,3 +99,8 @@ pub fn close_child_stdio() -> Option<String> { // returns what was left in the p
     }
     // TODO, CHECK IF PIPES GET CLOSED !!!!!!!!!!!!!!!!!
 }
+
+pub fn read_file(file: &Path) -> Vec<u8> { // TODOMAYBE create mmap instead
+    fs::read(file).unwrap()
+}
+
