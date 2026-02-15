@@ -257,7 +257,7 @@ fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a b
     Ok(())
 }
 
-fn source_step<'a>(pid: Pid, byte: u8, lines: &'a LineAddresses) -> Result<(Register,  &'a SourceLine), ()> { // new rip, line_number and File PathBuf
+fn source_step<'a>(pid: Pid, byte: u8, lines: &'a LineAddresses) -> Result<(Register,  &'a SourceIndex), ()> { // new rip, line_number and File PathBuf
     let mut rip = get_registers(pid)?.rip;
 
     step_over(pid, rip, byte)?;

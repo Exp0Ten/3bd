@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
-use std::borrow::Cow;
 
 
 use gimli::DebugInfoOffset;
@@ -39,8 +38,8 @@ pub type SourceMap = HashMap<PathBuf, Vec<SourceFile>>;
 pub trait ImplSourceMap {
     fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<&SourceFile>;
     fn get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf;
-    fn insert_file(&mut self, source_file: SourceFile, hash_dir: &PathBuf, line_number: u64) -> SourceLine;
-    fn index_with_line(&self, line: SourceLine) -> &SourceFile;
+    fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex;
+    fn index_with_line(&self, line: &SourceIndex) -> &SourceFile;
 }
 
 impl ImplSourceMap for SourceMap {
@@ -64,55 +63,55 @@ impl ImplSourceMap for SourceMap {
         )
     }
 
-    fn insert_file(&mut self, source_file: SourceFile, hash_dir: &PathBuf, line_number: u64) -> SourceLine {
-        if self.contains_key(hash_dir) {
-            let v =self.get_mut(hash_dir).unwrap();
+    fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex {
+        if self.contains_key(&hash_dir) {
+            let v =self.get_mut(&hash_dir).unwrap();
             for i in 0..v.len() {
                 if v[i] == source_file {
-                    return SourceLine::new(hash_dir.clone(), i, line_number);
+                    return SourceIndex::new(hash_dir, i, line_number);
                 }
             }
             v.push(source_file);
-            SourceLine::new(hash_dir.clone(), v.len()-1, line_number)
+            SourceIndex::new(hash_dir, v.len()-1, line_number)
         } else {
             self.insert(hash_dir.clone(), vec![source_file]);
-            SourceLine::new(hash_dir.clone(), 0, line_number)
+            SourceIndex::new(hash_dir, 0, line_number)
         }
     }
 
-    fn index_with_line(&self, line: SourceLine) -> &SourceFile {
+    fn index_with_line(&self, line: &SourceIndex) -> &SourceFile {
         let vec = self.get(&line.hash_path).unwrap();
         &vec[line.index]
     }
 }
 
 #[derive(PartialEq)]
-pub struct SourceLine {
-    number: u64,
+pub struct SourceIndex {
+    line: u64, // in the SourceFile
     hash_path: PathBuf,
-    index: usize
+    index: usize // in the SourceMap Vec
 }
 
-impl SourceLine {
-    fn new(hash_path: PathBuf, index: usize, line_number: u64) -> Self {
-        SourceLine {
-            number: line_number,
+impl SourceIndex {
+    fn new(hash_path: PathBuf, index: usize, line: u64) -> Self {
+        SourceIndex {
+            line,
             hash_path,
             index
         }
     }
 }
 
-pub type LineAddresses = HashMap<u64, SourceLine>;
+pub type LineAddresses = HashMap<u64, SourceIndex>;
 
 pub trait ImplLineAddresses<'a> {
-    fn get_line(&'a self, address: u64) -> Option<&'a SourceLine>;
+    fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex>;
     fn get_source_file(&'a self, address: u64) -> Option<SourceFile>;
-    fn get_address(&'a self, line: &SourceLine) -> Option<u64>;
+    fn get_address(&'a self, line: &SourceIndex) -> Option<u64>;
 }
 
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
-    fn get_line(&'a self, address: u64) -> Option<&'a SourceLine> {
+    fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
         self.get(&address)
     }
 
@@ -127,7 +126,7 @@ impl <'a> ImplLineAddresses<'a> for LineAddresses {
         }
     }
 
-    fn get_address(&'a self, line: &SourceLine) -> Option<u64> {
+    fn get_address(&'a self, line: &SourceIndex) -> Option<u64> {
         let keys = self.keys();
         for key in keys {
             let entry = &self[key];
@@ -156,6 +155,101 @@ impl SectionsToDwarf for DwarfSections<'_> {
 
 // Reading LINE_DATA
 
+fn load_dwarf(binary: &Vec<u8>) -> (DwarfSections, Endian) {
+    let object = object::File::parse(&**binary).unwrap();
+    let endian = if object.is_little_endian() {
+        Endian::Little
+    } else {
+        Endian::Big
+    };
+
+    let load_section = |id: gimli::SectionId| -> Result<Section, Box<dyn std::error::Error>> {
+        Ok(match object.section_by_name(id.name()) {
+            Some(section) => section.uncompressed_data()?,
+            None => Section::Borrowed(&[]),
+        })
+    };
+
+    let dwarf_sections = gimli::DwarfSections::load(&load_section).expect("loading sections??");
+
+    (dwarf_sections, endian)
+}
+
+fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli doesnt provide much better ways other than this, so ill leave comments
+
+    // here we create the hashmaps
+    let mut source_files = SourceMap::new();
+    let mut line_addresses = LineAddresses::new();
+
+    //this is just type annotations so i wouldnt have to write them out in the closure definition
+    type LineProgram<'a> = gimli::IncompleteLineProgram<EndianSlice<'a, Endian>, usize>;
+    type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
+
+    // this is extracted code for better readability into a closure. We take a single unit with its LineProgram, then we go row by row to link the RIP address and the lines, along with saving the files along the way
+    let mut parse_line_program = |line_program:LineProgram, unit: Unit| {
+        let comp_dir = PathBuf::from(unit.comp_dir.unwrap().to_string_lossy().into_owned());
+
+        let mut rows = line_program.rows();
+        while let Some((header, row)) = rows.next_row().unwrap() {
+            if row.end_sequence() {
+                continue;
+            }
+
+            let file = row.file(header).unwrap();
+            let file_name = file.path_name().string_value(&dwarf.debug_str).unwrap().to_string_lossy().into_owned();
+
+            let mut include_dir = {
+                let include_dir = file.directory(header).unwrap();
+                PathBuf::from(
+                    include_dir.string_value(&dwarf.debug_str)
+                    .unwrap().to_string_lossy().into_owned()
+                )
+            };
+
+            let (rel_dir, hash_dir) = if include_dir.is_relative() {
+                include_dir.push(file_name);
+                (include_dir, comp_dir.clone())
+            } else {
+                match include_dir.strip_prefix(comp_dir.clone()) {
+                    Ok(path) => {
+                        let mut rel_dir = PathBuf::from(path);
+                        rel_dir.push(file_name);
+                        (comp_dir.clone(), rel_dir)
+                    },
+                    Err(_) => (include_dir, PathBuf::from(file_name)),
+                }
+            };
+
+            let line = match row.line() {
+                Some(line) => line.get(),
+                None => continue
+            };
+            let address = row.address();
+
+            let source_file = SourceFile::new(rel_dir, unit.debug_info_offset().unwrap());
+
+            let source_index = source_files.insert_file(source_file, hash_dir, line);
+            line_addresses.insert(address, source_index);
+        }
+    };
+
+    //we iterate over ALL units (for now) and find the line program for all. Later on ill add filters to this as neededs
+    let mut units = dwarf.units();
+    while let Some(header) = units.next().unwrap() {
+        let unit = dwarf.unit(header).unwrap();
+        //let unit = unit.unit_ref(&dwarf);
+        if let Some(line_program) = unit.line_program.clone() {
+            parse_line_program(line_program, unit);
+        }
+    };
+
+    // here we set/overwrite the Internal data
+    let mut ibind = INTERNAL.access();
+    ibind.source_files = Some(SourceMap::new());
+    ibind.line_addresses = Some(LineAddresses::new());
+}
+
+
 /*
 
 Okay, i spent WAY TOO LONG on this and i have to explain:
@@ -177,84 +271,3 @@ Otherwise, yea, its pretty easy, although i might have to have more compilation 
 good luck
 
 */
-
-fn load_dwarf(binary: &Vec<u8>) -> DwarfSections {
-    let object = object::File::parse(&**binary).unwrap();
-    let endian = if object.is_little_endian() {
-        Endian::Little
-    } else {
-        Endian::Big
-    };
-
-    let load_section = |id: gimli::SectionId| -> Result<Section, Box<dyn std::error::Error>> {
-        Ok(match object.section_by_name(id.name()) {
-            Some(section) => section.uncompressed_data()?,
-            None => Section::Borrowed(&[]),
-        })
-    };
-
-    let dwarf_sections = gimli::DwarfSections::load(&load_section).expect("loading sections??");
-
-    dwarf_sections
-}
-
-fn load_source(dwarf: Dwarf) {
-    let mut line_addresses = LineAddresses::new();
-    let mut source_map = SourceMap::new();
-
-    let mut units = dwarf.units();
-    while let Some(header) = units.next().unwrap() {
-        let unit = dwarf.unit(header).unwrap();
-        let unit = unit.unit_ref(&dwarf);
-        if let Some(line_program) = unit.line_program.clone() {
-            let comp_dir = PathBuf::from(unit.comp_dir.unwrap().to_string_lossy().into_owned());
-
-            let mut rows = line_program.rows();
-            while let Some((header, row)) = rows.next_row().unwrap() {
-                if row.end_sequence() {
-                    continue;
-                }
-
-                let file = row.file(header).unwrap();
-                let file_name = file.path_name().string_value(&dwarf.debug_str).unwrap().to_string_lossy().into_owned();
-
-                let mut dir_path = {
-                    let include_dir = file.directory(header).unwrap();
-                    PathBuf::from(
-                        include_dir.string_value(&dwarf.debug_str)
-                        .unwrap().to_string_lossy().into_owned()
-                    )
-                };
-
-                let line = match row.line() {
-                    Some(line) => line.get(),
-                    None => continue
-                };
-
-
-
-
-                let address = row.address();
-                if file.directory_index() == 0 {
-                    dir_path.clear();
-                    dir_path.push(file_name);
-
-
-
-                } else if dir_path.is_relative() {
-                    dir_path.push(file_name);
-
-                    let source_file = SourceFile::new(dir_path, unit.debug_info_offset().unwrap());
-
-                    //let a = &mut source_map;
-                    //a.insert_file(source_file, &comp_dir);
-                    //line_addresses.insert(address, (line, source_map[&comp_dir].last().unwrap()));
-
-                } else {
-                    
-                };
-            }
-
-        }
-    }
-}
