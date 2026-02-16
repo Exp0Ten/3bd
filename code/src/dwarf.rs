@@ -175,6 +175,8 @@ fn load_dwarf(binary: &Vec<u8>) -> (DwarfSections, Endian) {
     (dwarf_sections, endian)
 }
 
+type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
+
 fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli doesnt provide much better ways other than this, so ill leave comments
 
     // here we create the hashmaps
@@ -183,7 +185,7 @@ fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli doesnt
 
     //this is just type annotations so i wouldnt have to write them out in the closure definition
     type LineProgram<'a> = gimli::IncompleteLineProgram<EndianSlice<'a, Endian>, usize>;
-    type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
+
 
     // this is extracted code for better readability into a closure. We take a single unit with its LineProgram, then we go row by row to link the RIP address and the lines, along with saving the files along the way
     let mut parse_line_program = |line_program:LineProgram, unit: Unit| {
@@ -249,7 +251,6 @@ fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli doesnt
     ibind.line_addresses = Some(LineAddresses::new());
 }
 
-
 /*
 
 Okay, i spent WAY TOO LONG on this and i have to explain:
@@ -271,3 +272,138 @@ Otherwise, yea, its pretty easy, although i might have to have more compilation 
 good luck
 
 */
+
+
+// FUNCTION RANGES
+
+type FunctionRange = std::ops::Range<u64>;
+
+pub struct FunctionIndex<Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
+    func_hash: HashMap<u64, FunctionOffset>,
+    range_hash: HashMap<Unit, Vec<FunctionRange>>
+}
+
+impl FunctionIndex {
+    fn new() -> Self {
+        FunctionIndex {
+            func_hash: HashMap::new(),
+            range_hash: HashMap::new()
+        }
+    }
+
+    fn insert_function(&mut self, range: FunctionRange, unit: DebugInfoOffset) {
+        let mut range_hash = &mut self.range_hash;
+        if range_hash.contains_key(&unit) {
+            range_hash.get_mut(&unit).unwrap().push(range);
+        } else {
+            range_hash.insert(unit, vec![range]);
+        }
+    }
+
+    fn direct_address(&self, address: u64) -> DebugInfoOffset {
+        self.func_hash[&address]
+    }
+
+    fn get_function(&self, address: u64, unit: DebugInfoOffset) -> Option<DebugInfoOffset> {
+        let range = match self.find_range(address, unit) {
+            Some(range) => range,
+            None => return None
+        };
+
+        Some(self.direct_address(range.start))
+    }
+
+    fn find_range(&self, address: u64, unit: DebugInfoOffset) -> Option<&FunctionRange> {
+        let ranges = &self.range_hash[&unit];
+        for range in ranges {
+            if range.contains(&address) {
+                return Some(range);
+            }
+        };
+        None
+    }
+}
+
+fn parse_functions(dwarf: Dwarf) {
+    let mut function_index = FunctionIndex::new();
+
+    let mut unit_headers = dwarf.units();
+
+    while let Some(unit_header) = unit_headers.next().unwrap() {
+        let unit = dwarf.unit(unit_header).unwrap();
+        let pointer_size = unit.address_size();
+        let base_addres = unit.low_pc; // for ranges attr
+
+        let entries = unit.entries();
+
+        loop {
+            let entry = match entries.current() {
+                Some(die) => die,
+                None => break
+            };
+
+            if entry.tag().static_string().unwrap_or("") == "DW_TAG_subprogram" {
+                let attributes = entry.attrs();
+
+                let mut tup: (u64, u64) = (0, 0);
+                let mut ranges = None;
+
+                for attribute in attributes {
+                    let name = attribute.name().static_string().unwrap_or("");
+                    if name == "DW_AT_low_pc" {
+                        tup.0 = attribute.udata_value().unwrap();
+                        continue;
+                    }
+                    if name == "DW_AT_high_pc" {
+                        tup.1 = attribute.udata_value().unwrap();
+                        continue;
+                    }
+                    if name == "DW_AT_ranges" {
+                        ranges = attribute.udata_value();
+
+                        break;
+                    }
+                };
+
+
+                if let Some(range_offset) = ranges {
+                    let mut ranges = dwarf.ranges.ranges(
+                        gimli::RangeListsOffset(range_offset as usize),
+                        unit.encoding(),
+                        base_addres,
+                        &dwarf.debug_addr,
+                        unit.addr_base
+                    ).expect("WTF RANGES");
+
+                    while let Some(range) = ranges.next().unwrap_or(None) {
+                        function_index.insert_function(range.begin..range.end, unit.debug_info_offset().unwrap());
+                    }
+
+                    continue;
+                }
+
+                if tup == (0, 0) {continue;}
+
+                let function_range = tup.0..tup.0+tup.1;
+
+                function_index.insert_function(function_range, unit.debug_info_offset().unwrap());
+
+            }
+        }
+
+    }
+
+    let mut ibind = INTERNAL.access();
+    ibind.function_index = Some(function_index);
+}
+
+// FUNCTION VARIABLE PARSING
+
+
+
+
+
+
+// STACK UNWINDING
+
+

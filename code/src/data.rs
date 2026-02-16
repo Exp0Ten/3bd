@@ -31,6 +31,7 @@ pub struct Internal {
     pub dwarf: Option<dwarf::DwarfSections<'static>>,
     pub source_files: Option<dwarf::SourceMap>,
     pub line_addresses: Option<dwarf::LineAddresses>, //dont forget to drop this reference when changing tracee
+    pub function_index: Option<dwarf::FunctionIndex>,
     pub breakpoints: Option<trace::Breakpoints>
 }
 
@@ -50,6 +51,7 @@ impl Internal {
             dwarf: None,
             source_files: None,
             line_addresses: None,
+            function_index: None,
             breakpoints: None
 
         }
@@ -68,6 +70,7 @@ impl Default for Internal {
             memory_file: None,
             source_files: None,
             line_addresses: None,
+            function_index: None,
             breakpoints: Some(trace::Breakpoints::new())
         }
     }
