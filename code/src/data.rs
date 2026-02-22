@@ -29,11 +29,15 @@ pub struct Internal {
     pub proc_path: Option<path::PathBuf>,
     pub memory_file: Option<fs::File>,
     pub dwarf: Option<dwarf::DwarfSections<'static>>,
+    pub eh_frame: Option<dwarf::EhFrame<'static>>,
     pub source_files: Option<dwarf::SourceMap>,
     pub line_addresses: Option<dwarf::LineAddresses>, //dont forget to drop this reference when changing tracee
     pub function_index: Option<dwarf::FunctionIndex>,
-    pub breakpoints: Option<trace::Breakpoints>
+    pub breakpoints: Option<trace::Breakpoints>,
+    pub registers: Option<nix::libc::user_regs_struct> // make custom struct later??
 }
+
+// TODO - ORGANISE INTO MORE VARIBLES!!!;
 
 // Public Handle
 
@@ -49,10 +53,12 @@ impl Internal {
             proc_path: None,
             memory_file: None,
             dwarf: None,
+            eh_frame: None,
             source_files: None,
             line_addresses: None,
             function_index: None,
-            breakpoints: None
+            breakpoints: None,
+            registers: None
 
         }
     }
@@ -67,11 +73,13 @@ impl Default for Internal {
             pid: None,
             proc_path: None,
             dwarf: None,
+            eh_frame: None,
             memory_file: None,
             source_files: None,
             line_addresses: None,
             function_index: None,
-            breakpoints: Some(trace::Breakpoints::new())
+            breakpoints: None,
+            registers: None
         }
     }
 }

@@ -177,7 +177,7 @@ fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
     }
 }
 
-fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> {
+pub fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> {
     match ptrace::getregs(pid) {
         Ok(regs) => Ok(regs),
         Err(err) => {Dialog::error(&format!("Could not get register values: {}", err), Some("Trace error")); Err(())}
@@ -279,7 +279,7 @@ fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> {
     }
 }
 
-fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
+pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
     let mut internal = INTERNAL.access();
     let mut memory = internal.memory_file.as_mut().unwrap();
     let mut buf: Vec<u8> = Vec::with_capacity(amount);

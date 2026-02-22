@@ -26,7 +26,5 @@ mod window;     // window handle
 // MAIN
 
 fn main() {
-    test::test();
-
-    //    window::run_app().expect("Not working");
+    window::run_app().expect("Not working");
 }
