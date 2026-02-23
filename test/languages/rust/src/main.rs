@@ -1,3 +1,4 @@
+
 enum Greeting {
     Hi,
     Hey,
@@ -14,11 +15,20 @@ struct Hello {
 
 impl Hello {
     fn default() -> Self {
+        let a = 10;
+        let b = 30;
+        let c = a + b;
+        println!("{c}");
         Hello {
             name: Greeting::Hi,
             length: 0,
             text: String::new()
         }
+    }
+
+    fn change_name(&mut self, name: Greeting) {
+        let wow = name;
+        self.name = wow;
     }
 }
 
@@ -42,6 +52,7 @@ fn main() {
 
     let text = String::from("Good morning everyone");
 
+    let o = Hello::default();
     let a = &text;
     let c = a;
 
@@ -49,6 +60,8 @@ fn main() {
 
     hello.text = text;
     hello.length = display::a(length as u8, 0) as u64;
+
+    hello.change_name(Greeting::GoodMorning);
 
     wow(10);
 }

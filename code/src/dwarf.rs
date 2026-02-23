@@ -285,26 +285,32 @@ good luck
 
 type FunctionRange = std::ops::Range<u64>;
 
-pub struct FunctionIndex<Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
+pub struct FunctionIndex<'a, Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
     func_hash: HashMap<u64, FunctionOffset>,
-    range_hash: HashMap<Unit, Vec<FunctionRange>>
+    range_hash: HashMap<Unit, Vec<FunctionRange>>,
+    subtype_parent: HashMap<FunctionOffset, Option<&'a str>> //kinda optional, but VERY useful // TODO, later, dont save name, but .debug_string offset !! (well see)
 }
 
-impl FunctionIndex {
+impl <'a>FunctionIndex<'a> {
     fn new() -> Self {
         FunctionIndex {
             func_hash: HashMap::new(),
-            range_hash: HashMap::new()
+            range_hash: HashMap::new(),
+            subtype_parent: HashMap::new()
         }
     }
 
-    fn insert_function(&mut self, range: FunctionRange, unit: DebugInfoOffset) {
-        let mut range_hash = &mut self.range_hash;
+    fn insert_function(&mut self, range: FunctionRange, function_entry: DebugInfoOffset ,unit: DebugInfoOffset, subtype_parent: Option<&'a str>) {
+        let range_hash = &mut self.range_hash;
         if range_hash.contains_key(&unit) {
-            range_hash.get_mut(&unit).unwrap().push(range);
+            range_hash.get_mut(&unit).unwrap().push(range.clone());
         } else {
-            range_hash.insert(unit, vec![range]);
+            range_hash.insert(unit, vec![range.clone()]);
         }
+        let func_hash = &mut self.func_hash;
+        func_hash.insert(range.start, function_entry);
+        let parent_hash = &mut self.subtype_parent;
+        parent_hash.insert(function_entry, subtype_parent);
     }
 
     fn direct_address(&self, address: u64) -> DebugInfoOffset {
@@ -336,6 +342,8 @@ fn parse_functions(dwarf: Dwarf) {
 
     let mut unit_headers = dwarf.units();
 
+    let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, tho unlikely, also the reason for DebugInfoOffset instead
+
     while let Some(unit_header) = unit_headers.next().unwrap() {
         let unit = dwarf.unit(unit_header).unwrap();
         // let pointer_size = unit.address_size();
@@ -343,59 +351,72 @@ fn parse_functions(dwarf: Dwarf) {
 
         let mut entries = unit.entries();
 
+        let mut parent_stack: Vec<&str> = Vec::new(); // i could technically always apppend the entire tree yk, but i think just the last parent will be infact enough, but yk TODO, we'll see
+
+
         loop {
+            let prev_entry = entries.current().unwrap(); // we need to do this here for coherent 'continue' logic in this loop
+            if entries.next_depth() > prev_entry.depth() { // even if this is a null entry, it will work, as the depth can never be higher after the null (which literally decreases the depth)
+                parent_stack.push(match prev_entry.attr_value(gimli::DW_AT_name) {
+                    Some(val) => val.string_value(&dwarf.debug_str).unwrap().to_string().unwrap(),
+                    None => ""
+                });
+            };
+
+            match entries.next_entry() {
+                Ok(some) => if !some {
+                    parent_stack.pop();
+                    continue;
+                },
+                Err(_) => break
+            };
+
             let entry = entries.current().unwrap();
 
-            if entry.tag() == gimli::DW_TAG_subprogram {
-                let attributes = entry.attrs();
 
-                let mut tup: (u64, u64) = (0, 0);
-                let mut ranges = None;
+            if entry.tag() != gimli::DW_TAG_subprogram {continue;}
+            if entry.attr(gimli::DW_AT_declaration).is_some() {
+                declarations.insert(entry.offset.to_debug_info_offset(&unit).unwrap(), *parent_stack.last().unwrap_or(&""));
+                continue;
+            }; // save and skip declarations (no pc for us and such), they will be handled later
 
-                for attribute in attributes {
-                    let name = attribute.name();
-                    if name == gimli::DW_AT_low_pc {
-                        tup.0 = attribute.udata_value().unwrap();
-                        continue;
-                    }
-                    if name == gimli::DW_AT_high_pc {
-                        tup.1 = attribute.udata_value().unwrap();
-                        continue;
-                    }
-                    if name == gimli::DW_AT_ranges {
-                        ranges = attribute.udata_value();
+            let parent: &str = match entry.attr(gimli::DW_AT_specification) {
+                Some(function_declaration) => *declarations.get(&DebugInfoOffset(function_declaration.offset_value().unwrap())).unwrap(),
+                None => *parent_stack.last().unwrap_or(&"")
+            };
 
-                        break;
-                    }
-                };
+            let applicable_parent = if parent == "" {None} else {Some(parent)}; // apart from the coherency, it saves us 7 bytes per empty parent
 
-                if let Some(range_offset) = ranges {
-                    let mut ranges = dwarf.ranges.ranges(
-                        gimli::RangeListsOffset(range_offset as usize),
-                        unit.encoding(),
-                        base_address,
-                        &dwarf.debug_addr,
-                        unit.addr_base
-                    ).expect("WTF RANGES");
+            if let Some(value) = entry.attr_value(gimli::DW_AT_ranges) {
+                let range_offset = value.offset_value().unwrap();
+                let mut ranges = dwarf.ranges.ranges(
+                    gimli::RangeListsOffset(range_offset),
+                    unit.encoding(),
+                    base_address,
+                    &dwarf.debug_addr,
+                    unit.addr_base
+                ).expect("WTF RANGES");
 
-                    while let Some(range) = ranges.next().unwrap_or(None) {
-                        function_index.insert_function(range.begin..range.end, unit.debug_info_offset().unwrap());
-                    }
-
-                    continue;
+                while let Some(range) = ranges.next().unwrap_or(None) {
+                    function_index.insert_function(range.begin..range.end, entry.offset.to_debug_info_offset(&unit).unwrap(), unit.debug_info_offset().unwrap(), applicable_parent);
                 }
 
-                if tup == (0, 0) {continue;}
-
-                let function_range = tup.0..tup.0+tup.1;
-
-                function_index.insert_function(function_range, unit.debug_info_offset().unwrap());
+                continue;
             }
 
-            match entries.next_entry() { // TODO, consider if next entry or next sibling
-                Ok(next) => if !next {break;},
-                Err(_) => break
-            }
+            let low_pc = match entry.attr_value(gimli::DW_AT_low_pc) {
+                Some(value) => value.udata_value().unwrap(),
+                None => continue // if we dont have the ranges or the pc definitions, then saving the function only breaks the code
+            };
+
+            let high_pc = match entry.attr_value(gimli::DW_AT_high_pc) {
+                Some(value) => value.udata_value().unwrap(),
+                None => continue
+            };
+
+            let function_range = low_pc..low_pc+high_pc;
+
+            function_index.insert_function(function_range, entry.offset.to_debug_info_offset(&unit).unwrap(), unit.debug_info_offset().unwrap(), applicable_parent);
         }
     }
 
