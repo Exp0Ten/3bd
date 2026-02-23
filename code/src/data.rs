@@ -32,7 +32,7 @@ pub struct Internal {
     pub eh_frame: Option<dwarf::EhFrame<'static>>,
     pub source_files: Option<dwarf::SourceMap>,
     pub line_addresses: Option<dwarf::LineAddresses>, //dont forget to drop this reference when changing tracee
-    pub function_index: Option<dwarf::FunctionIndex>,
+    pub function_index: Option<dwarf::FunctionIndex<'static>>,
     pub breakpoints: Option<trace::Breakpoints>,
     pub registers: Option<nix::libc::user_regs_struct> // make custom struct later??
 }

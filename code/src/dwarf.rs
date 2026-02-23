@@ -337,7 +337,7 @@ impl <'a>FunctionIndex<'a> {
     }
 }
 
-fn parse_functions(dwarf: Dwarf) {
+fn parse_functions(dwarf: Dwarf<'static>) {
     let mut function_index = FunctionIndex::new();
 
     let mut unit_headers = dwarf.units();
@@ -423,10 +423,6 @@ fn parse_functions(dwarf: Dwarf) {
     let mut ibind = INTERNAL.access();
     ibind.function_index = Some(function_index);
 }
-
-
-
-
 
 
 // STACK UNWINDING
