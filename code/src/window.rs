@@ -97,7 +97,7 @@ impl App {
 
 // DIALOG FUNCTIONS (those small windows when your program encounters an error, or when you wanna pick a file, you absolutely know what i mean just cant remember trust me)
 
-pub struct Dialog {} // Struct for dialog functions, and for easy export (i know i could make a module, but i dont wanna flood it with too many files, i already feel like ive got many)
+pub struct Dialog; // Struct for dialog functions, and for easy export (i know i could make a module, but i dont wanna flood it with too many files, i already feel like ive got many)
 
 impl Dialog {
     pub fn error(msg: &str, title: Option<&str>) {

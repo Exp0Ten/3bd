@@ -34,6 +34,7 @@ impl Hello {
 
 static h_string: &str = "Hello World!\n";
 
+type hi = (u8, u64);
 
 mod display;
 
@@ -50,11 +51,14 @@ fn main() {
 
     let mut hello = Hello::default();
 
-    let text = String::from("Good morning everyone");
+    let text = String::from(h_string);
 
     let o = Hello::default();
     let a = &text;
     let c = a;
+
+
+    let x: hi = (10, 65);
 
     let length = text.len();
 

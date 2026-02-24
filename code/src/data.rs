@@ -27,6 +27,7 @@ pub struct Internal {
     pub tracee_stdio: Option<(PipeWriter, PipeReader)>, // stdin writer, and stdout reader
     pub pid: Option<Pid>,
     pub proc_path: Option<path::PathBuf>,
+    pub dynamic_exec_shift: Option<u64>, // dynamic executables ave shifted RIP
     pub memory_file: Option<fs::File>,
     pub dwarf: Option<dwarf::DwarfSections<'static>>,
     pub eh_frame: Option<dwarf::EhFrame<'static>>,
@@ -51,6 +52,7 @@ impl Internal {
             tracee_stdio: None,
             pid: None,
             proc_path: None,
+            dynamic_exec_shift: None,
             memory_file: None,
             dwarf: None,
             eh_frame: None,
@@ -72,6 +74,7 @@ impl Default for Internal {
             tracee_stdio: None,
             pid: None,
             proc_path: None,
+            dynamic_exec_shift: None,
             dwarf: None,
             eh_frame: None,
             memory_file: None,
