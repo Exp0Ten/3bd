@@ -23,78 +23,61 @@ fn fork_test() {
     println!("I can also do this.")
 }
 
+// using:
+use crate::data::*;
+use crate::object::*;
+use crate::dwarf::*;
+
+
 // write anything in this function you wanna test, then just call it in main.rs, fn main
 pub fn test() {
-    let file = std::fs::read("/home/azi/debug/test/debug/a.out").unwrap();
+    first(); //load
+    second(); //dwarf
+    third();
 
-    let object = object::File::parse(&*file).unwrap();
-    let endian = if object::Object::is_little_endian(&object) {
-        gimli::RunTimeEndian::Little
-    } else {
-        gimli::RunTimeEndian::Big
-    };
+    let s = SOURCE.access();
+    let source = s.as_ref().unwrap();
 
-    let dwarf_sections = load_dwarf_sections(object, endian);
+    println!("{:?}", source.keys());
+    for key in source.keys() {
+        println!("{:?}", source.get(key).unwrap())
+    }
 
-    let dwarf = load_dwarf(&dwarf_sections, endian);
+    let l = LINES.access();
+    let lines = l.as_ref().unwrap();
 
-    dwarf_info(dwarf);
+    let file = source.get_file("/home/azi/debug/test/languages/c".into(), "main.c".into()).unwrap();
 
+    let address = lines.get_address(&SourceIndex {
+        line: 11,
+        hash_path: "/home/azi/debug/test/languages/c".into(),
+        index: file.1
+    }).unwrap();
+    println!("{address}");
 }
 
-use gimli::read;
-use gimli::Reader;
-use object::Object;
-use object::ObjectSection;
+fn first() {
+    let path = std::path::Path::new("a.out");
+    let data = crate::object::read_file(path);
+    println!("{:}", data.len());
 
-//struct Section<'data> {
-//    data: std::borrow::Cow<'data, [u8]>,
-//}
-
-type Section<'data> = std::borrow::Cow<'data, [u8]>;
-type Dwarf<'a> = read::Dwarf<read::EndianSlice<'a, gimli::RunTimeEndian>>;
-
-fn load_dwarf_sections(object: object::File, endian: gimli::RunTimeEndian) -> read::DwarfSections<Section> {
-    let load_section = |id: gimli::SectionId| -> Result<Section, Box<dyn std::error::Error>> {
-        Ok(match object.section_by_name(id.name()) {
-            Some(section) => section.uncompressed_data()?,
-            None => std::borrow::Cow::Borrowed(&[]),
-        })
-    };
-
-
-    let dwarf_sections = gimli::DwarfSections::load(&load_section).unwrap();
-
-    dwarf_sections
+    unsafe {
+        DATA = data;
+    }
+    FILE.sets(path.into());
 }
 
-fn load_dwarf<'a>(dwarf_sections: &'a read::DwarfSections<Section>, endian: gimli::RunTimeEndian) -> read::Dwarf<read::EndianSlice<'a, gimli::RunTimeEndian>> {
-    let borrow_section = |section| gimli::EndianSlice::new(Section::as_ref(section), endian);
+fn second() {
+    #[allow(static_mut_refs)]
+    let data = unsafe {
+        &DATA
+    };
 
-    let dwarf = dwarf_sections.borrow(borrow_section);
-    dwarf
+    let (dwarf, object) = load_dwarf(data);
+    DWARF.sets(dwarf);
+    EHFRAME.sets(EhFrame::new(object));
 }
 
-fn dwarf_info(dwarf: Dwarf) {
-    for header in dwarf.units() {
-        let unit = dwarf.unit(header.unwrap()).unwrap();
-
-        let mut entries = unit.entries();
-        while let Some(entry) = entries.next_dfs().unwrap_or(None) {
-            println!(
-            "<{}><{:x}> {}",
-            entry.depth(),
-            entry.offset().0,
-            entry.tag()
-        );
-
-        for attr in entry.attrs() {
-            print!("   {}: {:?}", attr.name(), attr.value());
-            if let Ok(s) = dwarf.attr_line_string(attr.value()) {
-                print!(" '{}'", s.to_string().unwrap());
-            }
-            println!()
-        }
-        }
-    };
+fn third() {
+    load_source(DWARF.access().as_ref().unwrap().dwarf(EHFRAME.access().as_ref().unwrap().endian));
 }

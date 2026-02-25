@@ -6,8 +6,6 @@ use std::os::unix::{process::CommandExt, fs::MetadataExt};
 
 use std::fs;
 
-use object::File;
-
 use std::io::pipe;
 use std::io::{PipeReader, PipeWriter, Read};
 
