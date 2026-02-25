@@ -284,7 +284,7 @@ pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
     let mut memory = internal.memory_file.as_mut().unwrap();
     let mut buf: Vec<u8> = Vec::with_capacity(amount);
 
-    seek_memory(address, &mut memory);
+    seek_memory(address, &mut memory)?;
 
     match memory.read_exact(&mut buf) {
         Ok(()) => (),
@@ -298,7 +298,7 @@ fn write_memory(address: u64, buf: &[u8]) -> Result<(), ()> {
     let mut internal = INTERNAL.access();
     let mut memory = internal.memory_file.as_mut().unwrap();
 
-    seek_memory(address, &mut memory);
+    seek_memory(address, &mut memory)?;
 
     match memory.write_all(buf) {
         Ok(_) => Ok(()),

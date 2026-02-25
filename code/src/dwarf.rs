@@ -340,19 +340,17 @@ impl <'a>FunctionIndex<'a> {
 fn parse_functions(dwarf: Dwarf<'static>) {
     let mut function_index = FunctionIndex::new();
 
+    let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, tho unlikely, also the reason for DebugInfoOffset instead
+
     let mut unit_headers = dwarf.units();
 
-    let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, tho unlikely, also the reason for DebugInfoOffset instead
 
     while let Some(unit_header) = unit_headers.next().unwrap() {
         let unit = dwarf.unit(unit_header).unwrap();
-        // let pointer_size = unit.address_size();
         let base_address = unit.low_pc; // for ranges attr
-
         let mut entries = unit.entries();
 
         let mut parent_stack: Vec<&str> = Vec::new(); // i could technically always apppend the entire tree yk, but i think just the last parent will be infact enough, but yk TODO, we'll see
-
 
         loop {
             let prev_entry = entries.current().unwrap(); // we need to do this here for coherent 'continue' logic in this loop
@@ -372,7 +370,6 @@ fn parse_functions(dwarf: Dwarf<'static>) {
             };
 
             let entry = entries.current().unwrap();
-
 
             if entry.tag() != gimli::DW_TAG_subprogram {continue;}
             if entry.attr(gimli::DW_AT_declaration).is_some() {
@@ -599,6 +596,7 @@ struct Function {
     parameters: Option<Vec<Parameter>>,
     variables: Option<Vec<Variable>>,
     return_type: Option<Type>,
+    debug_info_offset: Option<DebugInfoOffset>,
 }
 
 struct Variable {
@@ -649,7 +647,7 @@ fn unwind (
     let dwarf_unit = dwarf.unit(unit_header).unwrap();
 
     let offset = function.to_unit_offset(&dwarf_unit).unwrap();
-    let entries = dwarf_unit.entries_at_offset(offset).unwrap();
+    let mut entries = dwarf_unit.entries_at_offset(offset).unwrap();
     let die = entries.current().unwrap();
     let (mut function_info, frame_attribute) = extract_function_info(die, &dwarf);
 
@@ -657,7 +655,7 @@ fn unwind (
     let encoding = dwarf_unit.encoding();
     let cfa = get_cfa(&unwind_info, regs, eh_frame, encoding)?;
 
-    unwind_registers(&unwind_info, cfa, regs, eh_frame, encoding);
+    unwind_registers(&unwind_info, cfa, regs, eh_frame, encoding)?;
 
     let frame_base = if frame_attribute.is_some() {
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
@@ -671,7 +669,7 @@ fn unwind (
         None
     };
 
-    extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit);
+    extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
 
     let main_function = check_for_main(&function_info);
 
@@ -685,32 +683,39 @@ fn unwind (
     Ok(false)
 }
 
-fn extract_function_info<'a>(die: &gimli::DebuggingInformationEntry<EndianSlice<'a, Endian>, usize>, dwarf: &'a Dwarf) -> (Function, Option<gimli::AttributeValue<EndianSlice<'a, Endian>>>) {
-    let mut name = None;
-    let mut return_type = None;
-    let mut frame_base = None;
+fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlice<'a, Endian>, usize>, dwarf: &'a Dwarf) -> (Function, Option<gimli::AttributeValue<EndianSlice<'a, Endian>>>) {
 
-    let attributes = die.attrs();
-    for attribute in attributes {
-        match attribute.name() {
-            gimli::DW_AT_name => {
-                name = Some(attribute.string_value(&dwarf.debug_str).unwrap().to_string().unwrap().to_string());
-            },
-            gimli::DW_AT_frame_base => {
-                frame_base = Some(attribute.value());
-            },
-            gimli::DW_AT_type => {
-                return_type = Some(Type {0: attribute.offset_value().unwrap()});
-            },
-            _ => ()
-        }
+    let (name, return_type) = match entry.attr_value(gimli::DW_AT_specification) {
+        Some(specification) => {
+            let declaration_offset = get_unit_entry_offset(DebugInfoOffset(specification.offset_value().unwrap()), dwarf);
+            let declaration_entry = dwarf.unit(dwarf.unit_header(declaration_offset.1).unwrap()).unwrap().entry(declaration_offset.0).unwrap();
+            let name = declaration_entry.attr(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap();
+            let return_type = match declaration_entry.attr(gimli::DW_AT_type) {
+                    Some(attr) => Some(DebugInfoOffset(attr.offset_value().unwrap())),
+                    None => None
+            };
+            (name, return_type)
+        },
+        None => (
+            entry.attr(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap(),
+            match entry.attr(gimli::DW_AT_type) {
+                Some(attr) => Some(DebugInfoOffset(attr.offset_value().unwrap())),
+                None => None
+            }
+        )
+    };
+
+    let frame_base = match entry.attr_value(gimli::DW_AT_frame_base) {
+        Some(attr) => Some(attr),
+        None => None
     };
 
     (Function {
-        name: name.unwrap(),
+        name: String::from(name),
         parameters: None,
         variables: None,
-        return_type: return_type
+        return_type: return_type,
+        debug_info_offset: None
     }, frame_base)
 }
 
@@ -730,8 +735,18 @@ fn extract_variables<'a>(
     unit: &Unit
 ) -> Result<(), ()>{
     let fn_depth = entries.depth();
+    let mut first = true;
     loop {
-        entries.next_entry().unwrap();
+        if first {
+            first = false;
+            entries.next_entry().unwrap();
+        } else {
+            match entries.current().unwrap().tag() {
+                gimli::DW_TAG_subprogram | gimli::DW_TAG_inlined_subroutine => {entries.next_sibling().map_err(|_| ())?;} // skipping subfunctions and inlines
+                _ => {entries.next_entry().map_err(|_| ())?;}
+            };
+        };
+
         if fn_depth == entries.depth() { // if the new entry has the same depth as the original fn_depth, then they are siblings and therefore we ran into the end of the function locals definition // we cant just use the null entry, because the some variables can be in deeper lexical fields, so this is the easiest
             return Ok(());
         }
@@ -841,8 +856,7 @@ fn get_loclist_location(
     unit: &Unit,
     regs: &mut nix::libc::user_regs_struct,
     frame_base: Option<u64>,
-    encoding: gimli::Encoding,
-) -> Result<Location, ()> {
+    encoding: gimli::Encoding) -> Result<Location, ()> {
     let mut locations = dwarf.locations(unit, loc_list).map_err(|_| ())?;
     loop {
         let entry = locations.next().map_err(|_| ())?.ok_or(())?;
@@ -1098,6 +1112,74 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
     };
     todo!()
 }
+
+// Assembly
+
+use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, NasmFormatter};
+
+const AREA: usize = 2048; // how many bytes around the address to parse
+const BACKSCAN: u64 = 64;
+const BYTE_COLUMN: usize = 10;
+
+pub struct Assembly {
+    pointer: u64,
+    text: String,
+    addresses: Vec<u64>
+}
+
+fn align_pointer(address: u64, bytes: &[u8]) -> Result<u64, ()> {
+    'outer: for offset in 0..BACKSCAN {
+        let mut decoder = Decoder::with_ip(64, &bytes, address + offset, DecoderOptions::NONE);
+        let mut instruction = Instruction::default();
+        while decoder.can_decode() {
+            decoder.decode_out(&mut instruction);
+            if instruction.is_invalid() {
+                continue 'outer;
+            }
+        }
+        return Ok(address + offset);
+    };
+    Err(()) //HOW UNLUCKY WHAT
+}
+
+fn disassemble_code(address: u64) -> Result<Assembly, ()> {
+    let pointer = address-(AREA/2) as u64;
+    let bytes = trace::read_memory(pointer, AREA)?;
+    let valid_pointer = align_pointer(pointer, &bytes)?;
+
+    let mut decoder = Decoder::with_ip(64, &bytes, valid_pointer, DecoderOptions::NONE);
+    let mut formatter = NasmFormatter::new();
+
+    formatter.options_mut().set_digit_separator("_");
+    formatter.options_mut().set_first_operand_char_index(10);
+
+    let mut result = String::new();
+    let mut addresses: Vec<u64> = Vec::new();
+
+    let mut output = String::new();
+    let mut instruction = Instruction::default();
+
+    while decoder.can_decode() {
+        decoder.decode_out(&mut instruction);
+        output.clear();
+        formatter.format(&instruction, &mut output);
+
+        addresses.push(instruction.ip());
+
+        result.push_str(&format!("0x{:016x}    ", instruction.ip()));
+        result.push_str(&output);
+        result.push('\n');
+    };
+
+    Ok(Assembly {
+        pointer: valid_pointer,
+        text: result,
+        addresses
+    })
+
+}
+
+
 
 // HELPER
 

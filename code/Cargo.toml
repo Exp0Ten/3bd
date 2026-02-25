@@ -18,4 +18,4 @@ rust-embed = {version = "8.8.0", features = ["include-exclude"]}
 
 rfd = "0.17.2"
 
-#iced-x86 = "1.21.0" # disassembler (soon)
+iced-x86 = "1.21.0" # disassembler
