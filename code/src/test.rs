@@ -33,27 +33,10 @@ use crate::dwarf::*;
 pub fn test() {
     first(); //load
     second(); //dwarf
-    third();
+    third(); //line
+    fourth(); // functions
+    //WORKING
 
-    let s = SOURCE.access();
-    let source = s.as_ref().unwrap();
-
-    println!("{:?}", source.keys());
-    for key in source.keys() {
-        println!("{:?}", source.get(key).unwrap())
-    }
-
-    let l = LINES.access();
-    let lines = l.as_ref().unwrap();
-
-    let file = source.get_file("/home/azi/debug/test/languages/c".into(), "main.c".into()).unwrap();
-
-    let address = lines.get_address(&SourceIndex {
-        line: 11,
-        hash_path: "/home/azi/debug/test/languages/c".into(),
-        index: file.1
-    }).unwrap();
-    println!("{address}");
 }
 
 fn first() {
@@ -80,4 +63,9 @@ fn second() {
 
 fn third() {
     load_source(DWARF.access().as_ref().unwrap().dwarf(EHFRAME.access().as_ref().unwrap().endian));
+}
+
+fn fourth() {
+    let dwarf = DWARF.access();
+    parse_functions(dwarf.as_ref().unwrap().dwarf(EHFRAME.access().as_ref().unwrap().endian));
 }

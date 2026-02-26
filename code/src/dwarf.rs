@@ -308,13 +308,13 @@ good luck
 
 type FunctionRange = std::ops::Range<u64>;
 
-pub struct FunctionIndex<'a, Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
-    func_hash: HashMap<u64, FunctionOffset>,
-    range_hash: HashMap<Unit, Vec<FunctionRange>>,
-    subtype_parent: HashMap<FunctionOffset, Option<&'a str>> //kinda optional, but VERY useful // TODO, later, dont save name, but .debug_string offset !! (well see)
+pub struct FunctionIndex<Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
+    pub func_hash: HashMap<u64, FunctionOffset>,
+    pub range_hash: HashMap<Unit, Vec<FunctionRange>>,
+    pub subtype_parent: HashMap<FunctionOffset, String> //kinda optional, but VERY useful // TODO, later, dont save name, but .debug_string offset !! (well see)
 }
 
-impl <'a>FunctionIndex<'a> {
+impl FunctionIndex {
     fn new() -> Self {
         FunctionIndex {
             func_hash: HashMap::new(),
@@ -323,7 +323,7 @@ impl <'a>FunctionIndex<'a> {
         }
     }
 
-    fn insert_function(&mut self, range: FunctionRange, function_entry: DebugInfoOffset ,unit: DebugInfoOffset, subtype_parent: Option<&'a str>) {
+    fn insert_function(&mut self, range: FunctionRange, function_entry: DebugInfoOffset ,unit: DebugInfoOffset, subtype_parent: Option<&str>) {
         let range_hash = &mut self.range_hash;
         if range_hash.contains_key(&unit) {
             range_hash.get_mut(&unit).unwrap().push(range.clone());
@@ -332,15 +332,20 @@ impl <'a>FunctionIndex<'a> {
         }
         let func_hash = &mut self.func_hash;
         func_hash.insert(range.start, function_entry);
-        let parent_hash = &mut self.subtype_parent;
-        parent_hash.insert(function_entry, subtype_parent);
+        match subtype_parent {
+            Some(str) => {
+                let parent_hash = &mut self.subtype_parent;
+                parent_hash.insert(function_entry, str.to_string());
+            },
+            None => ()
+        };
     }
 
     fn direct_address(&self, address: u64) -> DebugInfoOffset {
         self.func_hash[&address]
     }
 
-    fn get_function(&self, address: u64, unit: DebugInfoOffset) -> Option<DebugInfoOffset> {
+    pub fn get_function(&self, address: u64, unit: DebugInfoOffset) -> Option<DebugInfoOffset> {
         let range = match self.find_range(address, unit) {
             Some(range) => range,
             None => return None
@@ -360,7 +365,7 @@ impl <'a>FunctionIndex<'a> {
     }
 }
 
-fn parse_functions(dwarf: Dwarf<'static>) {
+pub fn parse_functions(dwarf: Dwarf) {
     let mut function_index = FunctionIndex::new();
 
     let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, tho unlikely, also the reason for DebugInfoOffset instead
@@ -374,34 +379,42 @@ fn parse_functions(dwarf: Dwarf<'static>) {
         let mut entries = unit.entries();
 
         let mut parent_stack: Vec<&str> = Vec::new(); // i could technically always apppend the entire tree yk, but i think just the last parent will be infact enough, but yk TODO, we'll see
+        entries.next_entry().unwrap(); //first entry fetch !!!!!!!!
 
         loop {
-            let prev_entry = entries.current().unwrap(); // we need to do this here for coherent 'continue' logic in this loop
-            if entries.next_depth() > prev_entry.depth() { // even if this is a null entry, it will work, as the depth can never be higher after the null (which literally decreases the depth)
-                parent_stack.push(match prev_entry.attr_value(gimli::DW_AT_name) {
-                    Some(val) => val.string_value(&dwarf.debug_str).unwrap().to_string().unwrap(),
-                    None => ""
-                });
-            };
+            let prev_entry = entries.current(); // we need to do this here for coherent 'continue' logic in this loop
 
+            match prev_entry {
+                Some(entry) => {
+                    if entries.next_depth() > entries.depth() { // even if this is a null entry, it will work, as the depth can never be higher after the null (which literally decreases the depth)
+                        parent_stack.push(match entry.attr_value(gimli::DW_AT_name) {
+                            Some(val) => string(val, &dwarf),
+                            None => ""
+                        });
+                    };
+                },
+                None => ()
+            };
             match entries.next_entry() {
                 Ok(some) => if !some {
-                    parent_stack.pop();
-                    continue;
+                    break;
                 },
                 Err(_) => break
             };
 
-            let entry = entries.current().unwrap();
+            let entry = match entries.current() {
+                Some(entry) => entry,
+                None => {parent_stack.pop(); continue}
+            };
 
             if entry.tag() != gimli::DW_TAG_subprogram {continue;}
             if entry.attr(gimli::DW_AT_declaration).is_some() {
-                declarations.insert(entry.offset.to_debug_info_offset(&unit).unwrap(), *parent_stack.last().unwrap_or(&""));
+                declarations.insert(entry.offset.to_debug_info_offset(&unit).unwrap(), parent_stack.last().unwrap_or(&""));
                 continue;
             }; // save and skip declarations (no pc for us and such), they will be handled later
 
             let parent: &str = match entry.attr(gimli::DW_AT_specification) {
-                Some(function_declaration) => *declarations.get(&DebugInfoOffset(function_declaration.offset_value().unwrap())).unwrap(),
+                Some(function_declaration) => *declarations.get(&debug_reference(function_declaration.value(), &dwarf, &unit)).unwrap(),
                 None => *parent_stack.last().unwrap_or(&"")
             };
 
@@ -425,12 +438,12 @@ fn parse_functions(dwarf: Dwarf<'static>) {
             }
 
             let low_pc = match entry.attr_value(gimli::DW_AT_low_pc) {
-                Some(value) => value.udata_value().unwrap(),
+                Some(value) => number(value, &dwarf),
                 None => continue // if we dont have the ranges or the pc definitions, then saving the function only breaks the code
             };
 
             let high_pc = match entry.attr_value(gimli::DW_AT_high_pc) {
-                Some(value) => value.udata_value().unwrap(),
+                Some(value) => number(value, &dwarf),
                 None => continue
             };
 
@@ -668,7 +681,7 @@ type Bindings<'a> = (
     &'a EhFrame<'a>,
     &'a LineAddresses,
     &'a SourceMap,
-    &'a FunctionIndex<'a>,
+    &'a FunctionIndex,
     &'a DwarfSections<'a>,
 );
 
@@ -1247,11 +1260,27 @@ fn get_unit_entry_offset(offset: DebugInfoOffset, dwarf: &Dwarf) -> (gimli::Unit
     panic!(); // how did you get this far yk
 }
 
-fn string(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, dwarf: &Dwarf) -> String {
+fn string<'a>(attr: gimli::AttributeValue<EndianSlice<'a, Endian>>, dwarf: &'a Dwarf) -> &'a str {
     match attr {
-        gimli::AttributeValue::DebugLineStrRef(offset) => dwarf.line_string(offset).unwrap().to_string().unwrap().to_owned(),
-        gimli::AttributeValue::DebugStrRef(offset) => dwarf.string(offset).unwrap().to_string().unwrap().to_owned(),
-        gimli::AttributeValue::String(string) => string.to_string().unwrap().to_owned(),
-        _ => String::new()
+        gimli::AttributeValue::DebugLineStrRef(offset) => dwarf.line_string(offset).unwrap().to_string().unwrap(),
+        gimli::AttributeValue::DebugStrRef(offset) => dwarf.string(offset).unwrap().to_string().unwrap(),
+        gimli::AttributeValue::String(string) => string.to_string().unwrap(),
+        _ => ""
+    }
+}
+
+fn number(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, dwarf: &Dwarf) -> u64 {
+    match attr {
+        gimli::AttributeValue::Addr(val) => val,
+        gimli::AttributeValue::Udata(val) => val,
+        _ => 0
+    }
+}
+
+fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, dwarf: &Dwarf, unit: &Unit) -> DebugInfoOffset {
+    match attr {
+        gimli::AttributeValue::DebugInfoRef(value) => value,
+        gimli::AttributeValue::UnitRef(value) => value.to_debug_info_offset(unit).unwrap(),
+        _ => DebugInfoOffset(0)
     }
 }
