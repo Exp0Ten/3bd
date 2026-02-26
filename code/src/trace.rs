@@ -21,13 +21,20 @@ pub type Breakpoints = HashMap<u64, u8>;
 
 pub trait ImplBreakpoints {
     fn add(&mut self, address: u64, byte: u8);
+    fn add_future(&mut self, address: u64);
     fn remove(&mut self, address: u64) -> u8;
     fn is_active(&self, address: u64) -> bool;
+    fn disable_all(&self) -> Result<(), ()>;
+    fn enable_all(&mut self) -> Result<(), ()>;
 }
 
 impl ImplBreakpoints for Breakpoints {
     fn add(&mut self, address: u64, byte: u8) {
         self.insert(address, byte);
+    }
+
+    fn add_future(&mut self, address: u64) { // we save the location
+        self.add(address, 0);
     }
 
     fn remove(&mut self, address: u64) -> u8 {
@@ -37,23 +44,44 @@ impl ImplBreakpoints for Breakpoints {
     fn is_active(&self, address: u64) -> bool {
         self.contains_key(&address)
     }
+
+    fn disable_all(&self) -> Result<(), ()> { // This doesnt actually remove the saved breakpoints, it just removes them out of the tracee's code, good for single stepping and such
+        let keys = self.keys();
+        for key in keys {
+            let byte = self.get(key).unwrap();
+            remove_breakpoint(PID.access().unwrap(), anti_normal(*key), *byte)?;
+        };
+        Ok(())
+    }
+
+    fn enable_all(&mut self) -> Result<(), ()> {
+        let copy = self.clone();
+        let keys = copy.keys();
+        for key in keys {
+            let byte = insert_breakpoint(PID.access().unwrap(), anti_normal(*key))?;
+            *self.get_mut(key).unwrap() = byte;
+        };
+        Ok(())
+    }
 }
 
-struct MapBits {
-    r: bool,
-    w: bool,
-    x: bool,
+#[derive(Debug)]
+pub struct MapBits {
+    pub r: bool,
+    pub w: bool,
+    pub x: bool,
     p: bool
 }
 
-struct MemoryMap {
-    name: String,
-    range: (u64, u64),
-    permissions: MapBits,      // rwxp (read, write, execute, private)
-    offset: u64,               // into file
+#[derive(Debug)]
+pub struct MemoryMap {
+    pub name: String,
+    pub range: std::ops::Range<u64>,
+    pub permissions: MapBits,      // rwxp (read, write, execute, private)
+    pub offset: u64,               // into file
 }
 
-enum Register { // only general purpose for now
+pub enum Register { // only general purpose for now
     RAx(u64),
     RBx(u64),
     RCx(u64),
@@ -70,7 +98,7 @@ enum Register { // only general purpose for now
     R13(u64),
     R14(u64),
     R15(u64),
-    RIp(u64)
+    RIP(u64)
 }
 
 #[derive(Debug, Clone)]
@@ -87,10 +115,10 @@ pub fn operation_message(operation: Operation) {
     }
 }
 
-
-
-fn open_memory(proc_path: &mut PathBuf) -> Result<File, ()> {
-    match File::open({proc_path.push("mem"); proc_path}) {
+pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> {
+    let mut path = proc_path.clone();
+    path.push("mem");
+    match File::open(path) {
         Ok(file) => Ok(file),
         Err(err) => {Dialog::error(&format!("Could not open memory of the tracee: {}", err), Some("Trace Error")); Err(())}
     }
@@ -100,8 +128,10 @@ fn close_memory() {
     INTERNAL.access().memory_file = None;
 }
 
-fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
-    let mut file = match File::open({proc_path.push("maps"); proc_path}) {
+pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
+    let mut path = proc_path.clone();
+    path.push("maps");
+    let mut file = match File::open(path) {
         Ok(file) => file,
         Err(err) => {Dialog::error(&format!("Could not open memory map file of the tracee: {}", err), Some("Trace Error")); return Err(())}
     };
@@ -124,6 +154,8 @@ fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
 
             let mut range_split: std::str::Split<'_, &str> = split.next().unwrap().split("-");
             let range: (u64, u64) = (u64::from_str_radix(range_split.next().unwrap(), 16).unwrap(), u64::from_str_radix(range_split.next().unwrap(), 16).unwrap());
+
+            let range = range.0..range.1;
 
             let permissions_split = split.next().unwrap();
             let permissions = MapBits {
@@ -153,25 +185,34 @@ fn get_process_maps(proc_path: &mut PathBuf) -> Result<Vec<MemoryMap>, ()> {
     Ok(mmap_vector)
 }
 
-fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> {
+pub fn get_tracee_path(proc_path: &PathBuf) -> Result<PathBuf, ()> {
+    let mut path = proc_path.clone();
+    path.push("exe");
+    match std::fs::read_link(path) {
+        Ok(path) => Ok(path),
+        Err(err) => {Dialog::error(&format!("Could not get tracee's path: {}", err), Some("Trace error")); Err(())}
+    }
+}
+
+pub fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> {
     let save = match ptrace::read(pid, address as *mut c_void) {
-        Ok(long) => long as u16,
+        Ok(long) => long as u64,
         Err(err) => {Dialog::error(&format!("Could not insert breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
     };
 
-    match ptrace::write(pid, address as *mut c_void, (0xcc | (save & 0xff00)).into()) {
+    match ptrace::write(pid, address as *mut c_void, (0xcc | (save & 0xffffffffffffff00)) as i64) {
         Ok(()) => Ok((save & 0xff) as u8),
         Err(err) => {Dialog::error(&format!("Could not insert breakpoint at {}: {}", address, err), Some("Trace error")); Err(())}
     }
 }
 
-fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
+pub fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
     let save = match ptrace::read(pid, address as *mut c_void) {
-        Ok(long) => long as u16,
+        Ok(long) => long as u64,
         Err(err) => {Dialog::error(&format!("Could not remove breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
     };
 
-    match ptrace::write(pid, address as *mut c_void, (byte as u16 | (save & 0xff00)).into()) {
+    match ptrace::write(pid, address as *mut c_void, (byte as u64 | (save & 0xffffffffffffff00)) as i64) {
         Ok(()) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not remove breakpoint at {}: {}", address, err), Some("Trace error")); Err(())}
     }
@@ -191,7 +232,7 @@ fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> {
     }
 }
 
-fn set_register_value(pid: Pid, register: Register) -> Result<(), ()> {
+pub fn set_register_value(pid: Pid, register: Register) -> Result<(), ()> {
     let mut regs = get_registers(pid)?;
 
     match register {
@@ -211,7 +252,7 @@ fn set_register_value(pid: Pid, register: Register) -> Result<(), ()> {
         Register::R13(value) => regs.r13 = value,
         Register::R14(value) => regs.r14 = value,
         Register::R15(value) => regs.r15 = value,
-        Register::RIp(value) => regs.rip = value
+        Register::RIP(value) => regs.rip = value
     };
 
     set_registers(pid, regs)?;
@@ -239,36 +280,33 @@ fn signal_tracee(pid: Pid, signal: Signal) -> Result<(), ()> { //WRAPPER
     restart_tracee(pid, Some(signal))
 }
 
-fn continue_tracee(pid: Pid) -> Result<(), ()> { //WRAPPER
+pub fn continue_tracee(pid: Pid) -> Result<(), ()> { //WRAPPER
     restart_tracee(pid, None)
 }
 
-fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
+pub fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
     match ptrace::step(pid, signal) {
         Ok(()) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not step the tracee program: {}", err), Some("Trace error")); Err(())}
     }
 }
 
-fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a breakpoint, not over an instruction
+pub fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a breakpoint, not over an instruction
     remove_breakpoint(pid, rip, byte)?;
     step(pid, None)?;
     insert_breakpoint(pid, rip)?;
     Ok(())
 }
 
-fn source_step<'a>(pid: Pid, byte: u8, lines: &'a LineAddresses) -> Result<(Register,  &'a SourceIndex), ()> { // new rip, line_number and File PathBuf
-    let mut rip = get_registers(pid)?.rip;
-
-    step_over(pid, rip, byte)?;
-
+pub fn source_step<'a>(pid: Pid, lines: &'a LineAddresses) -> Result<(u64,  &'a SourceIndex), ()> { // new rip, line_number and File PathBuf
     loop {
-        rip = get_registers(pid)?.rip;
-        if lines.contains_key(&rip) {
-            return Ok((Register::RIp(rip), &lines[&rip]));
-        } else {
-            step(pid, None)?;
-        }
+        step(pid, None)?;
+        let _ = wait(pid);
+        let rip = get_registers(pid)?.rip;
+        match lines.get_line(rip) {
+            Some(line) => return Ok((rip, line)),
+            None => ()
+        };
     }
 }
 
@@ -280,9 +318,9 @@ fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> {
 }
 
 pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
-    let mut internal = INTERNAL.access();
-    let mut memory = internal.memory_file.as_mut().unwrap();
-    let mut buf: Vec<u8> = Vec::with_capacity(amount);
+    let mut bind = MEMORY.access();
+    let mut memory = bind.as_mut().unwrap();
+    let mut buf: Vec<u8> = vec![0; amount];
 
     seek_memory(address, &mut memory)?;
 
@@ -306,4 +344,10 @@ fn write_memory(address: u64, buf: &[u8]) -> Result<(), ()> {
     }
 }
 
-//TODO implement INTERNAL
+pub fn wait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
+    nix::sys::wait::waitpid(pid, None)
+}
+
+pub fn testwait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
+    nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG))
+}

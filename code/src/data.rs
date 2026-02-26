@@ -48,11 +48,12 @@ type Global<T> = Mutex<Option<T>>;
 
 pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::empty());
 pub static CONFIG: Global<config::Config> = empty();
-pub static FILE: Global<Box<std::path::Path>> = empty();
+pub static FILE: Global<std::path::PathBuf> = empty();
 pub static STDIO: Global<(PipeWriter, PipeReader)> = empty();
 pub static PID: Global<Pid> = empty();
 pub static PROC_PATH: Global<path::PathBuf> = empty();
 pub static EXEC_SHIFT: Global<u64> = empty();
+pub static MEMORY: Global<fs::File> = empty();
 pub static DWARF: Global<dwarf::DwarfSections> = empty();
 pub static EHFRAME: Global<dwarf::EhFrame> = empty();
 pub static SOURCE: Global<dwarf::SourceMap> = empty();
@@ -144,7 +145,6 @@ impl <T>ImplGlobal<T> for Global<T> {
         *self.access() = Some(new);
     }
 }
-
 
 
 

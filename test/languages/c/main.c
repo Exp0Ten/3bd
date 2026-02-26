@@ -11,4 +11,5 @@ int main() {
     int c = plus(a,b);
     char j[4] = "Ahoj";
     char *x = *j;
+    return -1;
 }

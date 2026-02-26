@@ -116,11 +116,11 @@ pub trait ImplLineAddresses<'a> {
 
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
-        self.get(&address)
+        self.get(&normal(address))
     }
 
     fn get_source_file(&self, address: u64) -> Option<SourceFile> {
-        match self.get(&address) {
+        match self.get(&normal(address)) {
             Some(line) => {
                 let bind = SOURCE.access();
                 let v= bind.as_ref().unwrap()[&line.hash_path].clone();
@@ -151,7 +151,8 @@ pub struct EhFrame<'a> {
     pub object: object::File<'a>,
     pub frame: std::borrow::Cow<'a, [u8]>,
     pub section_base: u64,
-    pub endian: Endian
+    pub endian: Endian,
+    pub main: Option<DebugInfoOffset>, // option for init
 }
 
 impl <'a>EhFrame<'a> {
@@ -171,7 +172,8 @@ impl <'a>EhFrame<'a> {
             object,
             frame,
             section_base: base,
-            endian
+            endian,
+            main: None
         }
     }
 }
@@ -456,6 +458,17 @@ pub fn parse_functions(dwarf: Dwarf) {
     FUNCTIONS.sets(function_index);
 }
 
+pub fn find_main() { // this means that you cannot debug such program that would recurse the main function or call it more than once, but most people dont do that, and the fix is immediate on user's side
+    let mut ehframe_bind = EHFRAME.access();
+    let ehframe = ehframe_bind.as_mut().unwrap();
+    let symbol = ehframe.object.symbol_by_name("main").unwrap();
+    let address = object::ObjectSymbol::address(&symbol);
+    let function_bind = &FUNCTIONS.access();
+    let functions = function_bind.as_ref().unwrap();
+    let function = functions.direct_address(address);
+    ehframe.main = Some(function);
+}
+
 // STACK UNWINDING
 
 struct UnwindInfo {
@@ -710,6 +723,8 @@ fn unwind (
     let die = entries.current().unwrap();
     let (mut function_info, frame_attribute) = extract_function_info(die, &dwarf);
 
+    function_info.debug_info_offset = Some(function);
+
     let unwind_info = get_unwind_for_address(normal(regs.rip), (&gimli_eh_frame, eh_frame));
     let encoding = dwarf_unit.encoding();
     let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
@@ -933,7 +948,7 @@ fn get_loclist_location(
 }
 
 fn check_for_main(info: &Function) -> bool { // function because of language specifications, for now just name matching
-    info.name == "name"
+    info.debug_info_offset == EHFRAME.access().as_ref().unwrap().main
 }
 
 // Type unwinding - especially for displaying the types
@@ -1242,10 +1257,17 @@ fn disassemble_code(address: u64) -> Result<Assembly, ()> {
 
 // HELPER
 
-fn normal(rip: u64) -> u64 {
+pub fn normal(rip: u64) -> u64 {
     match EXEC_SHIFT.access().as_ref() {
         Some(offset) => rip - offset,
         None => rip
+    }
+}
+
+pub fn anti_normal(address: u64) -> u64 {
+    match EXEC_SHIFT.access().as_ref() {
+        Some(offset) => address + offset,
+        None => address
     }
 }
 
