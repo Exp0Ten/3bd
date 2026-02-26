@@ -89,7 +89,7 @@ impl ImplSourceMap for SourceMap {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct SourceIndex {
     pub line: u64, // in the SourceFile
     pub hash_path: PathBuf,

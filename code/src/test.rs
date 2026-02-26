@@ -40,8 +40,8 @@ pub fn test() {
     second(); //dwarf
     third(); //line
     fourth(); // functions
-    //WORKING
     fith(); //exec, mem, breakpoints
+    //WORKING
     //sixth(); //callstack
     //seventh(); //variables and types, display
 }
@@ -145,8 +145,22 @@ fn fith() {
     let source_file = source.as_ref().unwrap().index_with_line(line);
     println!("{}: {}, {}", rip, line.line, source_file.path.display());
 
-    //WORKING
 
+    let mut line = line.clone();
+    line.line = 10;
+    let address = lines.as_ref().unwrap().get_address(&line).unwrap();
+    breakpoints.as_mut().unwrap().add_future(address);
+
+    breakpoints.as_mut().unwrap().enable_all();
+    trace::continue_tracee(pid);
+    let status = trace::wait(pid).unwrap();
+    println!("status: {status:?}");
+
+    let mut rip = get_registers(pid).unwrap().rip-1;
+    set_register_value(pid, Register::RIP(rip));
+    let line = lines.as_ref().unwrap().get_line(rip).unwrap();
+    let source_file = source.as_ref().unwrap().index_with_line(line);
+    println!("{}: {}, {}", rip, line.line, source_file.path.display());
 }
 
 
