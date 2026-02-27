@@ -56,6 +56,7 @@ pub static EXEC_SHIFT: Global<u64> = empty();
 pub static MEMORY: Global<fs::File> = empty();
 pub static DWARF: Global<dwarf::DwarfSections> = empty();
 pub static EHFRAME: Global<dwarf::EhFrame> = empty();
+pub static ENDIAN: Global<dwarf::Endian> = empty();
 pub static SOURCE: Global<dwarf::SourceMap> = empty();
 pub static LINES: Global<dwarf::LineAddresses> = empty();
 pub static FUNCTIONS: Global<dwarf::FunctionIndex> = empty();

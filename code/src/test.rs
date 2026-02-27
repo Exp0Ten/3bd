@@ -40,10 +40,11 @@ pub fn test() {
     second(); //dwarf
     third(); //line
     fourth(); // functions
-    fith(); //exec, mem, breakpoints
     //WORKING
-    //sixth(); //callstack
-    //seventh(); //variables and types, display
+    fith(); //exec, mem, breakpoints
+    sixth(); //callstack
+    // WORKING TESTED FOR C
+    seventh()
 }
 
 fn first() {
@@ -65,16 +66,24 @@ fn second() {
 
     let (dwarf, object) = load_dwarf(data);
     DWARF.sets(dwarf);
+    ENDIAN.sets(match object.endianness() {
+        object::Endianness::Little => Endian::Little,
+        object::Endianness::Big => Endian::Big
+    });
     EHFRAME.sets(EhFrame::new(object));
 }
 
 fn third() {
-    load_source(DWARF.access().as_ref().unwrap().dwarf(EHFRAME.access().as_ref().unwrap().endian));
+    load_source(DWARF.access().as_ref().unwrap().dwarf(ENDIAN.access().unwrap()));
+
+    for i in LINES.access().as_ref().unwrap().keys() {
+        println!("{:x}", i)
+    }
 }
 
 fn fourth() {
     let dwarf = DWARF.access();
-    parse_functions(dwarf.as_ref().unwrap().dwarf(EHFRAME.access().as_ref().unwrap().endian));
+    parse_functions(dwarf.as_ref().unwrap().dwarf(ENDIAN.access().unwrap()));
 }
 
 fn fith() {
@@ -146,9 +155,13 @@ fn fith() {
     println!("{}: {}, {}", rip, line.line, source_file.path.display());
 
 
-    let mut line = line.clone();
-    line.line = 10;
-    let address = lines.as_ref().unwrap().get_address(&line).unwrap();
+    let line = source.as_ref().unwrap().get_file("/home/azi/debug/test/languages/c".into(), "other.c".into()).unwrap();
+    let index = SourceIndex {
+        line: 3,
+        hash_path: "/home/azi/debug/test/languages/c".into(),
+        index: line.1
+    };
+    let address = lines.as_ref().unwrap().get_address(&index).unwrap();
     breakpoints.as_mut().unwrap().add_future(address);
 
     breakpoints.as_mut().unwrap().enable_all();
@@ -161,8 +174,48 @@ fn fith() {
     let line = lines.as_ref().unwrap().get_line(rip).unwrap();
     let source_file = source.as_ref().unwrap().index_with_line(line);
     println!("{}: {}, {}", rip, line.line, source_file.path.display());
+    REGISTERS.sets(trace::get_registers(pid).unwrap());
 }
 
+fn sixth() {
+    let callstack = call_stack().unwrap(); // WORKSSSSSSSSSSSS YESSSSSSSSSSSSSSSS
+    let bind = DWARF.access();
+    let dwarf = bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
+    let first = &callstack.0[0];
+    let var = &first.parameters.as_ref().unwrap()[0];
+    let typ = var.vtype;
+    let typedisplay = unwind_type(typ, &dwarf);
+    let basetype = match typedisplay {
+        TypeDisplay::Base(base) => base,
+        _ => unimplemented!()
+    };
+
+    let size = match basetype.size {
+        BitByteSize::Byte(val) => val,
+        _ => unimplemented!()
+    };
+
+    let location = match var.location {
+        Location::Address(a) => a,
+        Location::Register(_) => unimplemented!()
+    };
+
+    let bytes = read_memory(location, size as usize).unwrap();
+    println!("{:?}", bytes);
+
+
+}
+
+fn seventh() {
+    let pid = PID.access().unwrap();
+    let rip = get_registers(pid).unwrap().rip;
+    let bind = BREAKPOINTS.access();
+    let breakpoints = bind.as_ref().unwrap();
+    trace::step_over(pid, rip, *breakpoints.get(&normal(rip)).unwrap());
+    trace::continue_tracee(pid);
+    let status = wait(pid).unwrap();
+    println!("{status:?}");
+}
 
 // SAVE FOR BREAKPOINTS
 

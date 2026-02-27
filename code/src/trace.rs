@@ -294,6 +294,7 @@ pub fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
 pub fn step_over(pid: Pid, rip: u64, byte: u8) -> Result<(), ()> { // Step after a breakpoint, not over an instruction
     remove_breakpoint(pid, rip, byte)?;
     step(pid, None)?;
+    let _ = wait(pid);
     insert_breakpoint(pid, rip)?;
     Ok(())
 }
