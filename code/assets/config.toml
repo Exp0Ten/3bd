@@ -9,6 +9,6 @@ panel_mode = "middle" # "middle", "left", "right", "full"
 
 [layout.panes]
 main = ["code"] # next to each other
-left = ["control", "variables"]
-right = ["registers", "stack"]
-panel = ["terminal"]
+left = ["control", "memory"] # under each other
+right = ["registers", "stack"] # under each other
+panel = ["terminal"] # next to each other

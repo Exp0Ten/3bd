@@ -10,7 +10,7 @@ use iced::{
 };
 
 use crate::{
-    window::*, data::*, trace::*, style
+    window::*, data::*, trace::*, style, config
 };
 
 pub struct Layout {
@@ -18,103 +18,502 @@ pub struct Layout {
     sidebar_left: bool,
     sidebar_right: bool,
     panel: bool,
+    panel_mode: config::PanelMode,
     panes: pane_grid::State<Pane>,
     _focus: Option<pane_grid::Pane>
 }
 
 impl Default for Layout {
     fn default() -> Self {
+        let layout = CONFIG.access().as_ref().unwrap().layout.clone().unwrap();
         Layout {
-            status_bar: true,
-            sidebar_left: false,
-            sidebar_right: false,
-            panel: false,
-            panes: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
-                    axis: pane_grid::Axis::Vertical,
-                    ratio: 0.,
-                    a: Box::new(pane_grid::Configuration::Pane(Pane::Info(PaneInfo {}))),
-                    b: Box::new(pane_grid::Configuration::Pane(Pane::Terminal(PaneTerminal {text: Default::default()})))
-                }), // implement later from toml
-            //panes: pane_grid::State::new(Pane::Registers).0,
+            status_bar: layout.status_bar.unwrap(),
+            sidebar_left: layout.sidebar_left.unwrap(),
+            sidebar_right: layout.sidebar_right.unwrap(),
+            panel: layout.panel.unwrap(),
+            panel_mode: layout.panel_mode.unwrap(),
+            panes: Self::panes_config(),
             _focus: None
         }
     }
 }
 
+const SIDERATIO: f32 = 0.25;
+
+impl Layout {
+    fn panes_config() -> pane_grid::State<Pane> {
+        let bind = CONFIG.access();
+        let config = bind.as_ref().unwrap();
+        let layout = config.layout.as_ref().unwrap();
+
+        let left = layout.sidebar_left.unwrap();
+        let right = layout.sidebar_right.unwrap();
+        let panel = layout.panel.unwrap();
+
+        let mut list = layout.panes.clone().unwrap();
+
+        list.left.reverse(); //because we are popping them, not iterating through them
+        list.right.reverse();
+        list.panel.reverse();
+        list.main.reverse();
+
+        let panes = SavedState {
+            left_sidebar: (Self::serialize(list.left, pane_grid::Axis::Horizontal), SIDERATIO),
+            right_sidebar: (Self::serialize(list.right, pane_grid::Axis::Horizontal), SIDERATIO), // NOTE when saving here, you have to save the normalized value, just remember
+            panel: (Self::serialize(list.panel, pane_grid::Axis::Vertical), SIDERATIO),
+            main: Some(Self::serialize(list.main, pane_grid::Axis::Vertical))
+        };
+
+        SAVED_STATE.sets(panes.clone());
+
+        let base = Self::base(left, right, panel, layout.panel_mode.as_ref().unwrap(), panes);
+
+        pane_grid::State::with_configuration(base)
+    }
+
+    fn base(left: bool, right: bool, panel: bool, panel_mode: &config::PanelMode, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
+        let left_ratio = panes.left_sidebar.1;
+        let right_ratio = panes.right_sidebar.1;
+        let panel_ratio = panes.panel.1;
+
+        if panel { return match panel_mode {
+            config::PanelMode::full => Self::panel_full(left, right, panes),
+            config::PanelMode::middle => Self::panel_middle(left, right, panes),
+            config::PanelMode::left => Self::panel_left(left, right, panes),
+            config::PanelMode::right => Self::panel_right(left, right, panes)
+        };} else { //without the panel
+            if left & right {
+                return pane_grid::Configuration::Split{
+                    axis: pane_grid::Axis::Vertical,
+                    ratio: left_ratio,
+                    a: Box::new(panes.left_sidebar.0),
+                    b: Box::new(pane_grid::Configuration::Split {
+                    axis: pane_grid::Axis::Vertical,
+                    ratio: (1.0 - right_ratio - left_ratio)/(1.0-left_ratio), // just some math :P, basic percentages
+                    a: Box::new(panes.main.unwrap()),
+                    b: Box::new(panes.right_sidebar.0)
+                })};
+            };
+            if left {
+                return pane_grid::Configuration::Split {
+                    axis: pane_grid::Axis::Vertical,
+                    ratio: left_ratio,
+                    a: Box::new(panes.left_sidebar.0),
+                    b: Box::new(panes.main.unwrap())
+                };
+            };
+            if right {
+                return pane_grid::Configuration::Split {
+                    axis: pane_grid::Axis::Vertical,
+                    ratio: 1.0-right_ratio,
+                    a: Box::new(panes.main.unwrap()),
+                    b: Box::new(panes.right_sidebar.0)
+                };
+            }
+            return panes.main.unwrap();
+        };
+    }
+
+    fn panel_full(left: bool, right: bool, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
+        let left_ratio = panes.left_sidebar.1;
+        let right_ratio = panes.right_sidebar.1;
+        let panel_ratio = panes.panel.1;
+
+        if left & right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: (1.0 - right_ratio - left_ratio)/(1.0-left_ratio), // just some math :P, basic percentages
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.right_sidebar.0)
+            })})};
+        };
+        if left {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(panes.main.unwrap())
+            })};
+        };
+        if right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 1.0-right_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.right_sidebar.0)
+            })};
+        }
+        return pane_grid::Configuration::Split {
+            axis: pane_grid::Axis::Horizontal,
+            ratio: 1.0-panel_ratio,
+            a: Box::new(panes.main.unwrap()),
+            b: Box::new(panes.panel.0)
+        };
+    }
+
+    fn panel_middle(left: bool, right: bool, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
+        let left_ratio = panes.left_sidebar.1;
+        let right_ratio = panes.right_sidebar.1;
+        let panel_ratio = panes.panel.1;
+
+        if left & right {
+            return pane_grid::Configuration::Split{
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: (1.0 - right_ratio - left_ratio)/(1.0-left_ratio), // just some math :P, basic percentages
+                b: Box::new(panes.right_sidebar.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.panel.0)
+            })})};
+        };
+        if left {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.panel.0)
+            })};
+        };
+        if right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 1.0-right_ratio,
+                b: Box::new(panes.right_sidebar.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.panel.0)
+            })};
+        }
+        return pane_grid::Configuration::Split {
+            axis: pane_grid::Axis::Horizontal,
+            ratio: 1.0-panel_ratio,
+            a: Box::new(panes.main.unwrap()),
+            b: Box::new(panes.panel.0)
+        };
+    }
+
+    fn panel_left(left: bool, right: bool, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
+        let left_ratio = panes.left_sidebar.1;
+        let right_ratio = panes.right_sidebar.1;
+        let panel_ratio = panes.panel.1;
+
+        if left & right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: right_ratio,
+                b: Box::new(panes.left_sidebar.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: (left_ratio)/(1.0-right_ratio), // just some math :P, basic percentages
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.right_sidebar.0)
+            })})};
+        };
+        if left {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(panes.main.unwrap())
+            })};
+        };
+        if right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 1.0-right_ratio,
+                b: Box::new(panes.right_sidebar.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.panel.0)
+            })};
+        }
+        return pane_grid::Configuration::Split {
+            axis: pane_grid::Axis::Horizontal,
+            ratio: 1.0-panel_ratio,
+            a: Box::new(panes.main.unwrap()),
+            b: Box::new(panes.panel.0)
+        };
+    }
+
+    fn panel_right(left: bool, right: bool, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
+        let left_ratio = panes.left_sidebar.1;
+        let right_ratio = panes.right_sidebar.1;
+        let panel_ratio = panes.panel.1;
+
+        if left & right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: (1.0 - right_ratio - left_ratio)/(1.0-left_ratio), // just some math :P, basic percentages
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.right_sidebar.0)
+            })})};
+        };
+        if left {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: left_ratio,
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.panel.0)
+            })};
+        };
+        if right {
+            return pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Horizontal,
+                ratio: 1.0-panel_ratio,
+                b: Box::new(panes.panel.0),
+                a: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 1.0-right_ratio,
+                a: Box::new(panes.main.unwrap()),
+                b: Box::new(panes.right_sidebar.0)
+            })};
+        }
+        return pane_grid::Configuration::Split {
+            axis: pane_grid::Axis::Horizontal,
+            ratio: 1.0-panel_ratio,
+            a: Box::new(panes.main.unwrap()),
+            b: Box::new(panes.panel.0)
+        };
+    }
+
+    fn serialize(mut list: Vec<config::Pane>, axis: pane_grid::Axis) -> pane_grid::Configuration<Pane> {
+        fn magic(current: u8) -> f32 { // now when creating evenly distributed panes, we follow a rule of essentially just making 1/(n+1) series, where n is the amount still left, so yea
+            1.0 / (current + 1) as f32
+        }
+
+        let pane = match list.pop() {
+            None => return pane_grid::Configuration::Pane(Pane::Empty),
+            Some(pane) => match pane {
+                config::Pane::assembly => Pane::Assembly(PaneAssembly::default()),
+                config::Pane::memory => Pane::Memory(PaneMemory::default()),
+                config::Pane::code => Pane::Code(PaneCode::default()),
+                config::Pane::registers => Pane::Registers(PaneRegisters::default()),
+                config::Pane::stack => Pane::Stack(PaneStack::default()),
+                config::Pane::info => Pane::Info(PaneInfo::default()),
+                config::Pane::control => Pane::Control(PaneControl::default()),
+                config::Pane::terminal => Pane::Terminal(PaneTerminal::default())
+            }
+        };
+        if list.is_empty() {
+            pane_grid::Configuration::Pane(pane)
+        } else {
+            pane_grid::Configuration::Split {
+                axis,
+                ratio: magic(list.len() as u8), // more simple math :P
+                a: Box::new(pane_grid::Configuration::Pane(pane)),
+                b: Box::new(Self::serialize(list, axis))
+            }
+        }
+    }
+
+    fn get_main(&self) {
+
+    }
+
+    fn empty() -> Box<pane_grid::Configuration<Pane>> {
+        Box::new(pane_grid::Configuration::Pane(Pane::Empty))
+    }
+
+    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE
+        if self.panel { match self.panel_mode {
+            config::PanelMode::full => match self.panes.layout() {
+                pane_grid::Node::Split { a, ..} => match **a {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+            },
+            config::PanelMode::middle => match self.panes.layout() {
+                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                _ => panic!()
+            },
+            config::PanelMode::left => match self.panes.layout() {
+                pane_grid::Node::Split { a, ..} => match *a.clone() {
+                pane_grid::Node::Split { a, ..} => match *a {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+                },
+                _ => panic!()
+            },
+            config::PanelMode::right => match self.panes.layout() {
+                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                _ => panic!()
+            },
+        }} else {
+            match self.panes.layout() {
+                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                _ => panic!()
+            }
+        }
+    }
+
+    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE
+        if self.panel { match self.panel_mode {
+            config::PanelMode::full => match self.panes.layout() {
+                pane_grid::Node::Split { a, ..} => match *a.clone() {
+                pane_grid::Node::Split { b, .. } => match *b {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+                },
+                _ => panic!()
+            },
+            config::PanelMode::middle => match self.panes.layout() {
+                pane_grid::Node::Split { b, ..} => match **b {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+            },
+            config::PanelMode::left => match self.panes.layout() {
+                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                _ => panic!()
+            },
+            config::PanelMode::right => match self.panes.layout() {
+                pane_grid::Node::Split { b, ..} => match *b.clone() {
+                pane_grid::Node::Split { a, ..} => match *a {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+                },
+                _ => panic!()
+            }
+        }} else {
+            match self.panes.layout() {
+                pane_grid::Node::Split { b, ..} => match **b {
+                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                _ => panic!()
+                },
+                _ => panic!()
+            }
+        }
+    }
+
+    fn node_to_configuration(&self, node: &pane_grid::Node) -> pane_grid::Configuration<Pane> { // a recursive function, as this is the easiest way, also, its only for the row structures so its actually pretty easy
+        match node {
+            pane_grid::Node::Pane(pane) => pane_grid::Configuration::Pane(self.panes.get(*pane).unwrap().clone()), //retrive the state of the pane
+            pane_grid::Node::Split { id, axis, ratio, a, b } => {
+                pane_grid::Configuration::Split {
+                    axis: *axis,
+                    ratio: *ratio,
+                    a: Box::new(self.node_to_configuration(a)),
+                    b: Box::new(self.node_to_configuration(b))
+                }
+            }
+        }
+    }
+}
+
+
 #[derive(Debug, Clone)]
-enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
+pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
     Memory(PaneMemory),
     Stack(PaneStack),
     Code(PaneCode),
     Assembly(PaneAssembly),
     Registers(PaneRegisters),
-    Variables(PaneVariables),
     Info(PaneInfo), // ELF dump
     Control(PaneControl),
-    Terminal(PaneTerminal)
+    Terminal(PaneTerminal),
+    Empty
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneMemory {
     address: u64, // where are we in memory, we read extra 1KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
     bytes_per_row: u8, //min 4, max 16
     binary_display: bool,
     read_error: bool, // if read error occurs, show a button to take the user back (resets the address to a correct map)
     _selected: Select, // TODO feature
-    _colored: HashMap<MemColor, Select>, // TODO feature
-    _changed: [bool; 1024] // TODO feature highlight changed bytes
+    //_colored: HashMap<MemColor, Select>, // TODO feature
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct Select {
     address: u64,
     range: Option<u32> // option only for writing purposes
 }
 
-#[derive(Debug, Clone)]
-enum MemColor {} // TODO feature
+//#[derive(Debug, Clone)]
+//enum MemColor {} // TODO feature
 
-#[derive(Debug, Clone)]
-struct PaneStack {
-    function_list: Vec<FunctionInfo>
-}
+#[derive(Debug, Clone, Default)]
+struct PaneStack {} // TODO
 
-#[derive(Debug, Clone)]
-struct FunctionInfo { // use matching to find what you need to calculate again (for example main gets calculated only once, becasue return from main end the program)
-    name: String,
-    pc_address: u64,
-    stack: u64,
-    return_address: u64
-}
 
-#[derive(Debug, Clone)]
-struct PaneCode {
-    source_present: bool, //whether the program found the source code files
-    filename: String,
-    line_highlight: usize,
-    language: String
-}
+#[derive(Debug, Clone, Default)]
+struct PaneCode {}
 
-#[derive(Debug, Clone)]
-struct PaneAssembly {
-    address: u64, // same as in mem
-    text: HashMap<u64, String>, // code disassembly
-    address_highlight: u64 // which address to highlight
-}
+#[derive(Debug, Clone, Default)]
+struct PaneAssembly {} // TODO
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneRegisters {} //TODO
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneVariables {} // TODO
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneInfo {} // TODO
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneControl {} // TODO
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct PaneTerminal {
     text: String
 }
@@ -226,7 +625,6 @@ fn pane_view(id: pane_grid::Pane, pane: &Pane, _maximized: bool) -> pane_grid::C
         Pane::Code(state) => pane_view_code(state),
         Pane::Control(state) => pane_view_control(state),
         Pane::Memory(state) => pane_view_memory(state),
-        Pane::Variables(state) => pane_view_variables(state),
         Pane::Stack(state) => pane_view_stack(state),
         Pane::Registers(state) => pane_view_registers(state),
         Pane::Assembly(state) => pane_view_assembly(state),
@@ -257,37 +655,31 @@ fn pane_view_code<'a>(state: &PaneCode) -> (Container<'a, Message>, pane_grid::T
 
 fn pane_view_control<'a>(state: &PaneControl) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
     let titlebar = pane_titlebar("Control");
-    let content = todo!();
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
 fn pane_view_memory<'a>(state: &PaneMemory) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
     let titlebar = pane_titlebar("Memory");
-    let content = todo!();
-    (content, titlebar)
-}
-
-fn pane_view_variables<'a>(state: &PaneVariables) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Variables");
-    let content = todo!();
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
 fn pane_view_stack<'a>(state: &PaneStack) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
     let titlebar = pane_titlebar("Stack");
-    let content = todo!();
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
 fn pane_view_registers<'a>(state: &PaneRegisters) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
     let titlebar = pane_titlebar("Registers");
-    let content = todo!();
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
 fn pane_view_assembly<'a>(state: &PaneAssembly) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
     let titlebar = pane_titlebar("Assembly");
-    let content = todo!();
+    let content = container(text("TERMINAL"));
     (content, titlebar)
 }
 
@@ -323,11 +715,51 @@ pub fn pane_message(state: &mut State, pane: PaneMessage) {
             };
         }
         PaneMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
-            state.layout.panes.resize(split, ratio) // TODO maybe implement limit?
+            //state.layout.panes.resize(split, ratio)
+            resize(&mut state.layout, split, ratio);
         }
         //fill in later
         _ => ()
     };
+}
+
+//const LIMIT: f32 = 0.1; //TODO
+
+fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big resize logic function (mainly because of sidebars)
+    if !layout.sidebar_left { //normal configuration if there inst left sidebar // if there is, then either update the right if it is there, OR update the global value
+        layout.panes.resize(split, ratio);
+        return;
+    }
+    let (left, left_old_ratio) = layout.get_left_split();
+    if split != left { // if we arent affecting the left split, then again normal configuration
+        layout.panes.resize(split, ratio);
+        return;
+    }
+
+    if layout.sidebar_right {
+        let (right, right_old_ratio) = layout.get_right_split();
+        let new_ratio = (1.0 - (1.0 - (right_old_ratio * (1.0 - left_old_ratio)) - left_old_ratio) - ratio as f64)/(1.0 - ratio as f64);
+        //println!("{new_ratio}");
+        layout.panes.resize(left, limit(ratio));
+        layout.panes.resize(right, limit(new_ratio as f32));
+    } else {
+        let right_old_ratio = SAVED_STATE.access().as_ref().unwrap().right_sidebar.1 as f64;
+        let new_ratio = (1.0 - (1.0 - (right_old_ratio * (1.0 - left_old_ratio)) - left_old_ratio) - ratio as f64)/(1.0 - ratio as f64);
+        layout.panes.resize(left, limit(ratio));
+        SAVED_STATE.access().as_mut().unwrap().right_sidebar.1 = limit(new_ratio as f32);
+    };
+}
+// NOTE: this is ofc only done for the sidebars, actually the correct way to do this for any pane is to find the next inner split (by recursing throught b) to find the first split that uses the SAME axis, then apply this logic for it. i might do that at some point
+
+
+fn limit(ratio: f32) -> f32 { // this is not up for debate, this is to prevent some WEIRD graphics to appear
+    if ratio > 0.9 {
+        0.9
+    } else if  ratio < 0.1 {
+        0.1
+    } else {
+        ratio
+    }
 }
 
 
@@ -350,3 +782,5 @@ fn widget_fill<'a>() -> Container<'a, Message> {
 fn delimiter<'a>(width: usize) -> Container<'a, Message> {
     container(text("|")).width(Length::Fixed(width as f32)).height(Length::Fill)
 }
+
+// 

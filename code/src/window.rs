@@ -76,7 +76,6 @@ impl App {
         Task::none()
     }
 
-
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
 

@@ -63,6 +63,16 @@ pub static FUNCTIONS: Global<dwarf::FunctionIndex> = empty();
 pub static BREAKPOINTS: Global<trace::Breakpoints> = empty();
 pub static REGISTERS: Global<nix::libc::user_regs_struct> = empty();
 
+pub static SAVED_STATE: Global<SavedState> = empty();
+
+#[derive(Clone)]
+pub struct SavedState {
+    pub left_sidebar: (iced::widget::pane_grid::Configuration<crate::ui::Pane>, f32),
+    pub right_sidebar: (iced::widget::pane_grid::Configuration<crate::ui::Pane>, f32),
+    pub panel: (iced::widget::pane_grid::Configuration<crate::ui::Pane>, f32),
+    pub main: Option<iced::widget::pane_grid::Configuration<crate::ui::Pane>> // this is just for the parsing, not for the actual storing of the info
+}
+
 const fn empty<T>() -> Global<T> {Mutex::new(None)}
 
 impl <'a>Internal<'a> {

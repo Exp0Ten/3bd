@@ -25,8 +25,12 @@ mod window;     // window handle
 
 // MAIN
 
+use crate::data::*;
+
 fn main() {
-    println!("hii");
-    test::test();
-    //window::run_app().expect("Not working");
+    //println!("hii");
+    //test::test();
+    CONFIG.sets(config::Config::default());
+
+    window::run_app().expect("Not working");
 }
