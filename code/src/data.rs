@@ -46,7 +46,7 @@ pub static mut DATA: Vec<u8> = Vec::new(); //The file contents
 
 type Global<T> = Mutex<Option<T>>;
 
-pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::empty());
+//pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::empty());
 pub static CONFIG: Global<config::Config> = empty();
 pub static FILE: Global<std::path::PathBuf> = empty();
 pub static STDIO: Global<(PipeWriter, PipeReader)> = empty();
@@ -137,10 +137,6 @@ impl <'a> Glob<'a> for Mutex<Internal<'a>> {
     fn set(&'a self, internal: Internal<'a>) {
         *self.access() = internal;
     }
-}
-
-fn load_internal() { //TODO
-    Glob::set(&INTERNAL,Internal::default());
 }
 
 pub trait ImplGlobal<T> {

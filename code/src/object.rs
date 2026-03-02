@@ -87,19 +87,19 @@ pub fn open_child_stdio() -> Result<(PipeReader, PipeWriter), ()> { //returns th
         Err(err) => {Dialog::error(&format!("Could not open pipe: {}", err), Some("Trace error")); return Err(());}
     };
 
-    INTERNAL.access().tracee_stdio = Some((stdin_pipe.1, stdout_pipe.0));
+    STDIO.sets((stdin_pipe.1, stdout_pipe.0));
 
     Ok((stdin_pipe.0, stdout_pipe.1))
 }
 
 pub fn close_child_stdio() -> Option<String> { // returns what was left in the pipes, should be empty, errors on none empty
-    let mut internal = INTERNAL.access();
+    let mut stdio = STDIO.access();
 
-    let (stdin, stdout) = internal.tracee_stdio.as_mut().unwrap();
+    let (stdin, stdout) = stdio.as_mut().unwrap();
     let mut text = String::new();
 
     let _ = stdout.read_to_string(&mut text);
-    internal.tracee_stdio = None;
+    *stdio = None;
 
     if text == "" {
         None

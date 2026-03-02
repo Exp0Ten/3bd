@@ -21,7 +21,7 @@ pub struct Layout {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub enum PanelMode {
     middle,
     left,

@@ -125,7 +125,7 @@ pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> {
 }
 
 fn close_memory() {
-    INTERNAL.access().memory_file = None;
+    *MEMORY.access() = None;
 }
 
 pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
@@ -334,8 +334,8 @@ pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
 }
 
 fn write_memory(address: u64, buf: &[u8]) -> Result<(), ()> {
-    let mut internal = INTERNAL.access();
-    let mut memory = internal.memory_file.as_mut().unwrap();
+    let mut bind = MEMORY.access();
+    let mut memory = bind.as_mut().unwrap();
 
     seek_memory(address, &mut memory)?;
 

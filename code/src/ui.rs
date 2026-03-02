@@ -228,8 +228,8 @@ impl Layout {
         if left & right {
             return pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,
-                ratio: right_ratio,
-                b: Box::new(panes.left_sidebar.0),
+                ratio: 1.0-right_ratio,
+                b: Box::new(panes.right_sidebar.0),
                 a: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Horizontal,
                 ratio: 1.0-panel_ratio,
@@ -237,8 +237,8 @@ impl Layout {
                 a: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,
                 ratio: (left_ratio)/(1.0-right_ratio), // just some math :P, basic percentages
-                a: Box::new(panes.main.unwrap()),
-                b: Box::new(panes.right_sidebar.0)
+                a: Box::new(panes.left_sidebar.0),
+                b: Box::new(panes.main.unwrap()),
             })})};
         };
         if left {
@@ -364,23 +364,23 @@ impl Layout {
         Box::new(pane_grid::Configuration::Pane(Pane::Empty))
     }
 
-    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE
+    fn get_left_split(&self) -> (pane_grid::Split, f64, pane_grid::Node) { // caller must know that the side bar IS ACTUALLY ACTIVE
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
-                pane_grid::Node::Split { a, ..} => match **a {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { a, ..} => match *a.clone() {
+                pane_grid::Node::Split { id, ratio, a, ..} => (id, ratio as f64, *a),
                 _ => panic!()
                 },
                 _ => panic!()
             },
             config::PanelMode::middle => match self.panes.layout() {
-                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                pane_grid::Node::Split { id, ratio, a, ..} => (*id, *ratio as f64, *a.clone()),
                 _ => panic!()
             },
             config::PanelMode::left => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
                 pane_grid::Node::Split { a, ..} => match *a {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { id, ratio, a, ..} => (id, ratio as f64, *a),
                 _ => panic!()
                 },
                 _ => panic!()
@@ -388,23 +388,23 @@ impl Layout {
                 _ => panic!()
             },
             config::PanelMode::right => match self.panes.layout() {
-                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                pane_grid::Node::Split { id, ratio, a, ..} => (*id, *ratio as f64, *a.clone()),
                 _ => panic!()
             },
         }} else {
             match self.panes.layout() {
-                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                pane_grid::Node::Split { id, ratio, a, ..} => (*id, *ratio as f64, *a.clone()),
                 _ => panic!()
             }
         }
     }
 
-    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE
+    fn get_right_split(&self) -> (pane_grid::Split, f64, pane_grid::Node) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
                 pane_grid::Node::Split { b, .. } => match *b {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { id, ratio, b,..} => (id, ratio as f64, *b),
                 _ => panic!()
                 },
                 _ => panic!()
@@ -412,20 +412,20 @@ impl Layout {
                 _ => panic!()
             },
             config::PanelMode::middle => match self.panes.layout() {
-                pane_grid::Node::Split { b, ..} => match **b {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { b, ..} => match *b.clone() {
+                pane_grid::Node::Split { id, ratio, b,..} => (id, ratio as f64, *b),
                 _ => panic!()
                 },
                 _ => panic!()
             },
             config::PanelMode::left => match self.panes.layout() {
-                pane_grid::Node::Split { id, ratio, ..} => (*id, *ratio as f64),
+                pane_grid::Node::Split { id, ratio, b,..} => (*id, *ratio as f64, *b.clone()),
                 _ => panic!()
             },
             config::PanelMode::right => match self.panes.layout() {
                 pane_grid::Node::Split { b, ..} => match *b.clone() {
                 pane_grid::Node::Split { a, ..} => match *a {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { id, ratio, b,..} => (id, ratio as f64, *b),
                 _ => panic!()
                 },
                 _ => panic!()
@@ -434,14 +434,28 @@ impl Layout {
             }
         }} else {
             match self.panes.layout() {
-                pane_grid::Node::Split { b, ..} => match **b {
-                pane_grid::Node::Split { id, ratio, ..} => (id, ratio as f64),
+                pane_grid::Node::Split { b, ..} => match *b.clone() {
+                pane_grid::Node::Split { id, ratio, b,..} => (id, ratio as f64, *b),
                 _ => panic!()
                 },
                 _ => panic!()
             }
         }
     }
+
+//    fn get_left_node(&self) -> pane_grid::Node { // c
+//
+//    }
+//
+//    fn get_right_node(&self) -> pane_grid::Node { // caller must know only 
+//        if self.panel {
+//
+//        } else {
+//            
+//        };
+//    }
+//
+//    fn get_main(&self)
 
     fn node_to_configuration(&self, node: &pane_grid::Node) -> pane_grid::Configuration<Pane> { // a recursive function, as this is the easiest way, also, its only for the row structures so its actually pretty easy
         match node {
@@ -730,14 +744,36 @@ fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big res
         layout.panes.resize(split, ratio);
         return;
     }
-    let (left, left_old_ratio) = layout.get_left_split();
+
+    if layout.panel_mode == config::PanelMode::left {
+        let (right, right_old_ratio, _) = layout.get_right_split();
+        if split != right { // if we arent affecting the left split, then again normal configuration
+            layout.panes.resize(split, ratio);
+            return;
+        }
+
+        if layout.sidebar_right {
+            let (left, left_old_ratio, _) = layout.get_left_split();
+            let new_ratio = (left_old_ratio * right_old_ratio)/(ratio as f64);
+            layout.panes.resize(right, limit(ratio));
+            layout.panes.resize(left, limit(new_ratio as f32));
+        } else {
+            let left_old_ratio = SAVED_STATE.access().as_ref().unwrap().right_sidebar.1 as f64;
+            let new_ratio = (left_old_ratio * right_old_ratio)/(ratio as f64);
+            layout.panes.resize(right, limit(ratio));
+            SAVED_STATE.access().as_mut().unwrap().left_sidebar.1 = limit(new_ratio as f32);
+        };
+        return;
+    }
+
+    let (left, left_old_ratio, _) = layout.get_left_split();
     if split != left { // if we arent affecting the left split, then again normal configuration
         layout.panes.resize(split, ratio);
         return;
     }
 
     if layout.sidebar_right {
-        let (right, right_old_ratio) = layout.get_right_split();
+        let (right, right_old_ratio, _) = layout.get_right_split();
         let new_ratio = (1.0 - (1.0 - (right_old_ratio * (1.0 - left_old_ratio)) - left_old_ratio) - ratio as f64)/(1.0 - ratio as f64);
         //println!("{new_ratio}");
         layout.panes.resize(left, limit(ratio));
