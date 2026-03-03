@@ -13,6 +13,8 @@ use crate::{
     window::*, data::*, trace::*, style, config
 };
 
+pub use pane_grid::Split;
+
 pub struct Layout {
     status_bar: bool,
     sidebar_left: bool,
@@ -52,9 +54,9 @@ impl Layout {
         let panel_mode = layout.panel_mode.as_ref().unwrap();
 
         let (left_ratio, right_ratio) = match panel_mode {
-            config::PanelMode::right => {
-                ((1.0 - 2.0*SIDERATIO)/(1.0-SIDERATIO), SIDERATIO)
-            }
+            //config::PanelMode::left => {
+            //    ((SIDERATIO)/(1.0-SIDERATIO), (1.0 - SIDERATIO))
+            //}
             _ => {
                 (SIDERATIO, (1.0 - 2.0*SIDERATIO)/(1.0-SIDERATIO))
             }
@@ -458,6 +460,8 @@ impl Layout {
 
         let layout = self.panes.layout().clone();
 
+        let random = layout.splits().next().unwrap().clone();
+
         if self.panel { match self.panel_mode {
             config::PanelMode::full => {
                 match layout {
@@ -631,6 +635,17 @@ impl Layout {
                 }
             }
         };
+        if right.is_some() & !self.sidebar_right {
+            main = Some(pane_grid::Node::Split {
+                id: random, // a random Split, we just need to construct the Node
+                axis: pane_grid::Axis::Vertical,
+                ratio: right.as_ref().unwrap().1,
+                a: Box::new(main.unwrap()),
+                b: Box::new(right.unwrap().0)
+            });
+            return (main.unwrap(), left, None, panel);
+        }
+
         (main.unwrap(), left, right, panel)
     }
 
