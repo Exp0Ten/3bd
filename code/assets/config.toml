@@ -4,8 +4,8 @@
 status_bar = true
 sidebar_left = true
 sidebar_right = true
-panel = false
-panel_mode = "left" # "middle", "left", "right", "full"
+panel = true
+panel_mode = "full" # "middle", "left", "right", "full"
 
 [layout.panes]
 main = ["code", "info"] # next to each other

@@ -54,9 +54,13 @@ impl Layout {
         let panel_mode = layout.panel_mode.as_ref().unwrap();
 
         let (left_ratio, right_ratio) = match panel_mode {
-            //config::PanelMode::left => {
-            //    ((SIDERATIO)/(1.0-SIDERATIO), (1.0 - SIDERATIO))
-            //}
+            config::PanelMode::left => {
+                if panel {
+                    ((SIDERATIO)/(1.0-SIDERATIO), (1.0 - SIDERATIO))
+                } else {
+                    (SIDERATIO, (1.0 - 2.0*SIDERATIO)/(1.0-SIDERATIO))
+                }
+            }
             _ => {
                 (SIDERATIO, (1.0 - 2.0*SIDERATIO)/(1.0-SIDERATIO))
             }
@@ -947,14 +951,29 @@ fn layout(layout: &mut Layout, pane: PaneMessage) {
         _ => ()
     };
 
-    SAVED_STATE.sets(saved_state.clone());
-
     match pane {
         PaneMessage::SidebarLeftToggle => layout.sidebar_left ^= true,
         PaneMessage::SidebarRightToggle => layout.sidebar_right ^= true,
-        PaneMessage::PanelToggle => layout.panel ^= true,
+        PaneMessage::PanelToggle => {
+            if layout.panel_mode == config::PanelMode::left {
+                if layout.panel {
+                    let new_left_ratio = (saved_state.left_sidebar.1 as f64)*(saved_state.right_sidebar.1 as f64);
+                    let new_right_ratio = (1.0 - saved_state.right_sidebar.1 as f64)/(1.0 - new_left_ratio);
+                    saved_state.left_sidebar.1 = new_left_ratio as f32;
+                    saved_state.right_sidebar.1 = 1.0 - new_right_ratio as f32;
+                } else {
+                    let new_right_ratio = (1.0 - saved_state.right_sidebar.1 as f64)*(1.0 - saved_state.left_sidebar.1 as f64);
+                    let new_left_ratio = (saved_state.left_sidebar.1 as f64)/(1.0 - new_right_ratio);
+                    saved_state.left_sidebar.1 = new_left_ratio as f32;
+                    saved_state.right_sidebar.1 = 1.0 - new_right_ratio as f32;
+                }
+            };
+            layout.panel ^= true
+        },
         _ => ()
     };
+
+    SAVED_STATE.sets(saved_state.clone());
 
     let base = Layout::base(layout.sidebar_left, layout.sidebar_right, layout.panel, &layout.panel_mode, saved_state);
 
