@@ -5,10 +5,10 @@ status_bar = true
 sidebar_left = true
 sidebar_right = true
 panel = true
-panel_mode = "full" # "middle", "left", "right", "full"
+panel_mode = "left" # "middle", "left", "right", "full"
 
 [layout.panes]
-main = ["code", "info"] # next to each other
+main = ["code"] # next to each other
 left = ["control", "memory"] # under each other
 right = ["registers", "stack"] # under each other
-panel = ["terminal"] # next to each other
+panel = ["info", "terminal"] # next to each other

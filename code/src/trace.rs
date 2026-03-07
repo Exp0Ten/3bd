@@ -16,6 +16,7 @@ use crate::data::*;
 use crate::window::Dialog;
 use crate::dwarf::*;
 use crate::object;
+use crate::window;
 
 pub type Breakpoints = HashMap<u64, u8>;
 
@@ -104,11 +105,14 @@ pub enum Register { // only general purpose for now
 #[derive(Debug, Clone)]
 pub enum Operation {
     LoadFile,
-    ReloadFile
+    ReloadFile,
+    RunTracee,
+    StopTracee,
+    Pause
     //fill as needed
 }
 
-pub fn operation_message(operation: Operation) {
+pub fn operation_message(state: &mut window::State, operation: Operation) {
     match operation {
         Operation::LoadFile => {Dialog::file(None, None);}, //TODO async
         _ => ()

@@ -1,19 +1,16 @@
-use std::collections::HashMap;
-
 use iced::{
     Task, Length,
     widget::{
         Container, Row, Theme,
         button, column, container, mouse_area, pane_grid, row, svg, text,
         svg::Handle
-    }
+    },
+    padding
 };
 
 use crate::{
     window::*, data::*, trace::*, style, config
 };
-
-pub use pane_grid::Split;
 
 pub struct Layout {
     status_bar: bool,
@@ -349,7 +346,7 @@ impl Layout {
         }
 
         let pane = match list.pop() {
-            None => return pane_grid::Configuration::Pane(Pane::Empty),
+            None => return pane_grid::Configuration::Pane(Pane::_Empty),
             Some(pane) => match pane {
                 config::Pane::assembly => Pane::Assembly(PaneAssembly::default()),
                 config::Pane::memory => Pane::Memory(PaneMemory::default()),
@@ -464,7 +461,10 @@ impl Layout {
 
         let layout = self.panes.layout().clone();
 
-        let random = layout.splits().next().unwrap().clone();
+        let random: Option<pane_grid::Split> = match layout.splits().next() {
+            Some(split) => Some(split.clone()),
+            None => None
+        };
 
         if self.panel { match self.panel_mode {
             config::PanelMode::full => {
@@ -641,7 +641,7 @@ impl Layout {
         };
         if right.is_some() & !self.sidebar_right {
             main = Some(pane_grid::Node::Split {
-                id: random, // a random Split, we just need to construct the Node
+                id: random.unwrap(), // a random Split, we just need to construct the Node
                 axis: pane_grid::Axis::Vertical,
                 ratio: right.as_ref().unwrap().1,
                 a: Box::new(main.unwrap()),
@@ -679,7 +679,7 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     Info(PaneInfo), // ELF dump
     Control(PaneControl),
     Terminal(PaneTerminal),
-    Empty
+    _Empty //just in case
 }
 
 #[derive(Debug, Clone, Default)]
@@ -704,7 +704,6 @@ struct Select {
 #[derive(Debug, Clone, Default)]
 struct PaneStack {} // TODO
 
-
 #[derive(Debug, Clone, Default)]
 struct PaneCode {}
 
@@ -713,9 +712,6 @@ struct PaneAssembly {} // TODO
 
 #[derive(Debug, Clone, Default)]
 struct PaneRegisters {} //TODO
-
-#[derive(Debug, Clone, Default)]
-struct PaneVariables {} // TODO
 
 #[derive(Debug, Clone, Default)]
 struct PaneInfo {} // TODO
@@ -742,13 +738,12 @@ pub enum PaneMessage {
 
 pub fn content(state: &State) -> Container<'_, Message> {
     container(column(
-        //if state.layout.status_bar {vec![
-        if true {vec![
-            toolbar(state, 50).into(),
+        if state.layout.status_bar {vec![
+            toolbar(state, 45).into(),
             main_frame(state).into(),
             statusbar(state, 20).into()
         ]} else {vec![
-            toolbar(state, 50).into(),
+            toolbar(state, 45).into(),
             main_frame(state).into(),
         ]}
     ))
@@ -756,7 +751,7 @@ pub fn content(state: &State) -> Container<'_, Message> {
 
 fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
-    fn buttons<'a>(state: &State, size: f32) -> [button::Button<'a, Message>; 4] {
+    fn buttons<'a>(state: &State, size: u16) -> [button::Button<'a, Message>; 4] {
         let load_file = svg_button("icons/load_file.svg", size, None).on_press(Message::Operation(Operation::LoadFile)).style(style::bar_button);
 
         // Toggle buttons:
@@ -785,7 +780,7 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
         sidebar_left,
         sidebar_right,
         panel
-    ) = buttons(state, (height as f32)-padding*2.).into();
+    ) = buttons(state, ((height as f32)-padding*2.) as u16).into();
 
     let left_buttons: Row<'_, Message> = row![
         load_file
@@ -819,27 +814,28 @@ fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
 fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
     container(
-        pane_grid(&state.layout.panes, pane_view).spacing(10)
+        pane_grid(&state.layout.panes, |id, pane, _maximized| pane_view(id, pane, state)).spacing(10)
         .width(Length::Fill)
         .height(Length::Fill)
         .on_click(|pane| Message::Pane(PaneMessage::_Focus(pane)))
         .on_drag(|drag_event| Message::Pane(PaneMessage::Drag(drag_event)))
         .on_resize(10, |resize_event| Message::Pane(PaneMessage::Resize(resize_event)))
+        .spacing(2)
     ).center(Length::Fill)
     .width(Length::Fill)
     .height(Length::Fill)
 }
 
-fn pane_view(id: pane_grid::Pane, pane: &Pane, _maximized: bool) -> pane_grid::Content<'_, Message> {
+fn pane_view<'a>(id: pane_grid::Pane, pane: &Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
     let (content, titlebar) = match pane {
-        Pane::Code(state) => pane_view_code(state),
-        Pane::Control(state) => pane_view_control(state),
-        Pane::Memory(state) => pane_view_memory(state),
-        Pane::Stack(state) => pane_view_stack(state),
-        Pane::Registers(state) => pane_view_registers(state),
-        Pane::Assembly(state) => pane_view_assembly(state),
-        Pane::Terminal(state) => pane_view_terminal(state),
-        Pane::Info(state) => pane_view_info(state),
+        Pane::Code(state) => (pane_view_code(state), pane_titlebar("Code", "icons/pane_source.svg")),
+        Pane::Control(state) => (pane_view_control(state), pane_titlebar("Control", "icons/pane_control.svg")),
+        Pane::Memory(state) => (pane_view_memory(state), pane_titlebar("Memory", "icons/pane_memory.svg")),
+        Pane::Stack(state) => (pane_view_stack(state), pane_titlebar("CallStack", "icons/pane_stack.svg")),
+        Pane::Registers(state) => (pane_view_registers(state), pane_titlebar("Registers", "icons/pane_registers.svg")),
+        Pane::Assembly(state) => (pane_view_assembly(state), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
+        Pane::Terminal(state) => (pane_view_terminal(state), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
+        Pane::Info(state) => (pane_view_info(state), pane_titlebar("ELF Info", "icons/pane_info.svg")),
 
         _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
     };
@@ -847,62 +843,91 @@ fn pane_view(id: pane_grid::Pane, pane: &Pane, _maximized: bool) -> pane_grid::C
     pane_grid::Content::new(content).title_bar(titlebar)
 }
 
-fn pane_titlebar(title: &str) -> pane_grid::TitleBar<'_, Message> {
-    let height = 30;
+fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, Message> {
+    let height = 25;
     pane_grid::TitleBar::new(
-        text(title)
-        .height(Length::Fixed(height as f32))
-        .width(Length::Shrink)
-        //TODO
-    )
+        row![
+            svg(Handle::from_memory(Asset::get(icon).unwrap().data))
+            .height(Length::Fill)
+            .width(Length::Shrink)
+            .style(style::bar_svg),
+            text(title)
+            .size(15)
+            .height(Length::Fill)
+            .width(Length::Shrink)
+            .center()
+        ].spacing(5).padding(padding::left(3)).height(height)
+    ).style(style::pane_title)
 }
 
-fn pane_view_code<'a>(state: &PaneCode) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Code");
+fn pane_view_code<'a>(state: &PaneCode) -> Container<'a, Message> {
     let content = container(text("CODE"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_control<'a>(state: &PaneControl) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Control");
+fn pane_view_control<'a>(state: &PaneControl) -> Container<'a, Message> {
+    let size = 30;
+
+    let file = FILE.access().is_some();
+    let running = PID.access().is_some();
+
+    let start_stop = if running {
+        svg_button("icons/stop.svg", size, Some(style::widget_svg))
+        .style(style::widget_button)
+        .on_press(Message::Operation(Operation::StopTracee))
+    } else {
+        svg_button("icons/run.svg", size, Some(style::widget_svg))
+        .style(style::widget_button)
+        .on_press(Message::Operation(Operation::RunTracee))
+    };
+
+    let pause = svg_button("icons/pause.svg", size, Some(style::bar_svg))
+    .on_press_maybe(if running {Some(Message::Operation(Operation::StopTracee))} else {None})
+    .style(style::widget_button);
+
+    let step = svg_button("icons/pause.svg", size, Some(style::bar_svg))
+    .on_press_maybe(if running {Some(Message::Operation(Operation::StopTracee))} else {None})
+    .style(style::widget_button);
+
+    //let cont = ;
+
+    //let signal = ;
+
+    let content = container(row![
+        start_stop,
+        pause
+    ]);
+    content
+}
+
+fn pane_view_memory<'a>(state: &PaneMemory) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_memory<'a>(state: &PaneMemory) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Memory");
+fn pane_view_stack<'a>(state: &PaneStack) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_stack<'a>(state: &PaneStack) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Stack");
+fn pane_view_registers<'a>(state: &PaneRegisters) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_registers<'a>(state: &PaneRegisters) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Registers");
+fn pane_view_assembly<'a>(state: &PaneAssembly) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_assembly<'a>(state: &PaneAssembly) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Assembly");
+fn pane_view_terminal<'a>(state: &PaneTerminal) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
-    (content, titlebar)
+    content
 }
 
-fn pane_view_terminal<'a>(state: &PaneTerminal) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Terminal");
-    let content = container(text("TERMINAL"));
-    (content, titlebar)
-}
-
-fn pane_view_info<'a>(state: &PaneInfo) -> (Container<'a, Message>, pane_grid::TitleBar<'a, Message>) {
-    let titlebar = pane_titlebar("Info");
+fn pane_view_info<'a>(state: &PaneInfo) -> Container<'a, Message> {
     let content = container(text("INFO"));
-    (content, titlebar)
+    content
 }
 
 
@@ -1033,7 +1058,6 @@ fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big res
 }
 // NOTE: this is ofc only done for the sidebars, actually the correct way to do this for any pane is to find the next inner split (by recursing throught b) to find the first split that uses the SAME axis, then apply this logic for it. i might do that at some point
 
-
 fn limit(ratio: f32) -> f32 { // this is not up for debate, this is to prevent some WEIRD graphics to appear
     if ratio > 0.9 {
         0.9
@@ -1045,16 +1069,17 @@ fn limit(ratio: f32) -> f32 { // this is not up for debate, this is to prevent s
 }
 
 
+
 // Widgets helpers
 
-fn svg_button<'a>(icon: &str, size: f32, svg_style: Option<fn(&Theme, svg::Status) -> svg::Style>) -> button::Button<'a, Message> {
+fn svg_button<'a>(icon: &str, size: u16, svg_style: Option<fn(&Theme, svg::Status) -> svg::Style>) -> button::Button<'a, Message> {
     button(
         svg(Handle::from_memory(Asset::get(icon).unwrap().data))
         .height(Length::Fill)
         .style(svg_style.unwrap_or(style::bar_svg))
     ).padding(4)
-    .height(size as f32)
-    .width(size as f32)
+    .height(size)
+    .width(size)
 }
 
 fn widget_fill<'a>() -> Container<'a, Message> {

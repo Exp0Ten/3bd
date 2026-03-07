@@ -9,7 +9,7 @@ use iced::{
 use rfd;
 
 use crate::{
-    ui::*, config, trace
+    ui::*, config, trace, data
 };
 
 #[derive(Default)]
@@ -20,18 +20,16 @@ pub struct App {
     // add more as needed
 }
 
+#[derive(Default)]
 pub struct State {
-    pub layout: Layout
-    //    panes: pane_grid::State<Pane>
+    pub layout: Layout,
+    pub internal: Internal
     // add more as needed
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State {
-            layout: Layout::default()
-        }
-    }
+#[derive(Debug, Default)]
+pub struct Internal {
+    
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +54,7 @@ impl App {
         //config::get_app().unwrap_or(Self::new())
         Self {
             state: State::default(),
-            theme: Theme::Dark,
+            theme: Theme::Dracula,
             settings: window::Settings {
                 decorations: true,
                 ..Default::default()
@@ -68,7 +66,7 @@ impl App {
         let state = &mut self.state;
 
         match message {
-            Message::Operation(operation) => trace::operation_message(operation),
+            Message::Operation(operation) => trace::operation_message(state, operation),
             Message::Pane(pane) => pane_message(state, pane),
             _ => ()
         };

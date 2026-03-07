@@ -18,28 +18,6 @@ use rust_embed::Embed; // to run as a single file binary without the dependecy o
 #[exclude = "*/LICENSE"]
 pub struct Asset;
 
-//Internal Data
-//#[derive(Debug)]
-//#![allow(unused)] // if needed
-pub struct Internal<'a> {
-    pub config: Option<config::Config>,
-    pub file: Option<Box<std::path::Path>>,
-    pub tracee_stdio: Option<(PipeWriter, PipeReader)>, // stdin writer, and stdout reader
-    pub pid: Option<Pid>,
-    pub proc_path: Option<path::PathBuf>,
-    pub dynamic_exec_shift: Option<u64>, // dynamic executables ave shifted RIP
-    pub memory_file: Option<fs::File>,
-    pub dwarf: Option<dwarf::DwarfSections<'a>>,
-    pub eh_frame: Option<dwarf::EhFrame<'a>>,
-    pub source_files: Option<dwarf::SourceMap>,
-    pub line_addresses: Option<dwarf::LineAddresses>, //dont forget to drop this reference when changing tracee
-    pub function_index: Option<dwarf::FunctionIndex>,
-    pub breakpoints: Option<trace::Breakpoints>,
-    pub registers: Option<nix::libc::user_regs_struct> // make custom struct later??
-}
-
-// TODO - ORGANISE INTO MORE VARIBLES!!!;
-
 // Public Handle
 
 pub static mut DATA: Vec<u8> = Vec::new(); //The file contents
@@ -74,70 +52,6 @@ pub struct SavedState {
 }
 
 const fn empty<T>() -> Global<T> {Mutex::new(None)}
-
-impl <'a>Internal<'a> {
-    const fn empty() -> Self {
-        Internal {
-            config: None,
-            file: None,
-            tracee_stdio: None,
-            pid: None,
-            proc_path: None,
-            dynamic_exec_shift: None,
-            memory_file: None,
-            dwarf: None,
-            eh_frame: None,
-            source_files: None,
-            line_addresses: None,
-            function_index: None,
-            breakpoints: None,
-            registers: None
-
-        }
-    }
-}
-
-impl <'a>Default for Internal<'a> {
-    fn default() -> Self {
-        Internal {
-            config: Some(config::load_config()),
-            file: None,
-            tracee_stdio: None,
-            pid: None,
-            proc_path: None,
-            dynamic_exec_shift: None,
-            dwarf: None,
-            eh_frame: None,
-            memory_file: None,
-            source_files: None,
-            line_addresses: None,
-            function_index: None,
-            breakpoints: None,
-            registers: None
-        }
-    }
-}
-
-pub trait Glob<'a> {
-    fn access(&'a self) -> MutexGuard<'a, Internal<'a>>;
-//    fn get(&'a self) -> Internal;
-    fn set(&'a self, internal: Internal<'a>);
-    //  add more as needed
-}
-
-impl <'a> Glob<'a> for Mutex<Internal<'a>> {
-    fn access(&'a self) -> MutexGuard<'a, Internal<'a>> {
-        self.lock().unwrap()
-    }
-
-//    fn get(&'a self) -> Internal {
-//        self.access().clone()
-//    }
-
-    fn set(&'a self, internal: Internal<'a>) {
-        *self.access() = internal;
-    }
-}
 
 pub trait ImplGlobal<T> {
     fn access(&self) -> MutexGuard<'_, Option<T>>;

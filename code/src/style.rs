@@ -21,6 +21,19 @@ pub fn bar(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn pane_title(theme: &Theme) -> container::Style {
+    let pallete = theme.extended_palette();
+    container::Style {
+        //text_color: Some(pallete.primary.base.text),
+        background: Some(Background::Color(color_darken(pallete.background.weak.color, 0.2))),
+        border: Border {
+            radius: Radius::new(0),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 pub fn bar_svg(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
     svg::Style { color: Some(pallete.background.base.text) }
@@ -31,6 +44,20 @@ pub fn bar_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style { color: Some(pallete.background.base.color) }
 }
 
+pub fn widget_svg(theme: &Theme, _status: svg::Status) -> svg::Style {
+    let pallete = theme.extended_palette();
+    svg::Style { color: Some(pallete.primary.base.color) }
+}
+
+pub fn button_svg_disabled(theme: &Theme, _status: svg::Status) -> svg::Style {
+    let pallete = theme.extended_palette();
+    svg::Style { color: Some(pallete.primary.weak.color) }
+}
+
+pub fn widget_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
+    let pallete = theme.extended_palette();
+    svg::Style { color: Some(pallete.background.base.color) }
+}
 
 pub fn bar_button(theme: &Theme, status: button::Status) -> button::Style {
     let pallete = theme.extended_palette();
@@ -65,6 +92,24 @@ pub fn bar_button_toggled(theme: &Theme, status: button::Status) -> button::Styl
         ..Default::default()
     }
 }
+
+pub fn widget_button(theme: &Theme, status: button::Status) -> button::Style {
+    let pallete = theme.extended_palette();
+    let color = Color::TRANSPARENT;
+    button::Style {
+        background: match status {
+            button::Status::Hovered => Some(Background::Color(color_mix(color, pallete.background.base.text, 0.6))),
+            button::Status::Pressed => Some(Background::Color(color_darken(color, 0.3))),
+            _ => Some(Background::Color(color))
+        },
+        border: Border {
+            radius: Radius::new(5),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 
 fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color {
     Color {
