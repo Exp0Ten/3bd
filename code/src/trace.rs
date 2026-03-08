@@ -7,23 +7,30 @@ use std::collections::HashMap;
 
 
 use nix::sys::ptrace;
-use nix::sys::signal::Signal;
+use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
 use nix::libc::user_regs_struct;
+
+use ::object as object_foreign;
+
+use object_foreign::Object;
+use object_foreign::ObjectSymbol;
+
 
 use crate::data::*;
 use crate::window::Dialog;
 use crate::dwarf::*;
 use crate::object;
 use crate::window;
+use crate::ui;
 
 pub type Breakpoints = HashMap<u64, u8>;
 
 pub trait ImplBreakpoints {
     fn add(&mut self, address: u64, byte: u8);
     fn add_future(&mut self, address: u64);
-    fn remove(&mut self, address: u64) -> u8;
+    fn rem(&mut self, address: u64) -> u8;
     fn is_active(&self, address: u64) -> bool;
     fn disable_all(&self) -> Result<(), ()>;
     fn enable_all(&mut self) -> Result<(), ()>;
@@ -38,7 +45,7 @@ impl ImplBreakpoints for Breakpoints {
         self.add(address, 0);
     }
 
-    fn remove(&mut self, address: u64) -> u8 {
+    fn rem(&mut self, address: u64) -> u8 {
         self.remove(&address).unwrap()
     }
 
@@ -120,21 +127,177 @@ pub enum Operation {
     //fill as needed
 }
 
+
+// Inner Tracing Logic
+
 pub fn operation_message(state: &mut window::State, operation: Operation) {
     match operation {
-        Operation::LoadFile => {Dialog::file(None, None);}, //FEATURE async?
-        Operation::RunTracee => {},
-        Operation::StopTracee => {},
-        Operation::Step => {},
-        Operation::SourceStep => {},
-        Operation::Pause => {},
-        Operation::Continue => {},
-        Operation::Kill => {},
-        Operation::Signal => {},
+        Operation::LoadFile => {
+            let file = match Dialog::file(None, None) {
+                Some(file) => file,
+                None => return
+            };
+            match object::test_file(&file) {
+                Ok(_) => (),
+                Err(()) => return
+            };
+
+            let data = object::read_file(&file);
+
+
+            unsafe {
+                DATA = data
+            }
+            FILE.sets(file);
+
+            dwarf_set(); // preloading all dwarf related data
+            panes_preload(state);
+        }, //FEATURE async?
+        Operation::RunTracee => {
+            let pid = match object::run_tracee(FILE.access().as_ref().unwrap(), Vec::new(), None) {
+                Err(_) => return,
+                Ok(pid) => {PID.sets(Pid::from_raw(pid)); Pid::from_raw(pid)},
+            };
+            tracee_setup(state, pid);
+        },
+        Operation::StopTracee => {
+            match kill_tracee(PID.access().unwrap()) {
+                Ok(_) => (),
+                Err(()) => return
+            };
+            STDIO.none();
+            PID.none();
+            PROC_PATH.none();
+            EXEC_SHIFT.none();
+            MEMORY.none();
+            REGISTERS.none();
+        },
+        Operation::Step => {
+            let pid = PID.access().unwrap();
+            if step(pid, None).is_err() {return;};
+            state.status = Some(wait(pid).unwrap());
+            REGISTERS.sets(get_registers(pid).unwrap());
+        },
+        Operation::SourceStep => {
+            let pid = PID.access().unwrap();
+            if source_step(pid, LINES.access().as_ref().unwrap()).is_err() {
+                return;
+            };
+            REGISTERS.sets(get_registers(pid).unwrap());
+
+        },
+        Operation::Pause => {
+            if signal(PID.access().unwrap(), Signal::SIGTRAP).is_err() {
+                return;
+            };
+        },
+        Operation::Continue => {
+            BREAKPOINTS.access().as_mut().unwrap().enable_all().unwrap();
+            let pid = PID.access().unwrap();
+
+            if continue_tracee(pid).is_err() {
+                return;
+            };
+            state.status = Some(wait(pid).unwrap());
+            BREAKPOINTS.access().as_ref().unwrap().disable_all().unwrap();
+            REGISTERS.sets(get_registers(pid).unwrap());
+        },
+        Operation::Kill => {
+            if signal(PID.access().unwrap(), Signal::SIGKILL).is_err() {
+                return;
+            };
+        },
+        Operation::Signal => {
+            if signal(PID.access().unwrap(), state.internal.selected_signal.unwrap()).is_err() {
+                return;
+            };
+        },
         Operation::SignalSelect(signal) => {state.internal.selected_signal = Some(signal)},
+        Operation::BreakpointAdd(addr) => BREAKPOINTS.access().as_mut().unwrap().add_future(addr),
+        Operation::BreakpointRemove(addr) => {BREAKPOINTS.access().as_mut().unwrap().rem(addr);},
         _ => ()
     }
 }
+
+fn dwarf_set() {
+    #[allow(static_mut_refs)]
+    let data = unsafe {
+        &DATA
+    };
+
+    let (dwarf, object) = load_dwarf(data);
+
+    let endian = match object.endianness() {
+        object_foreign::Endianness::Little => Endian::Little,
+        object_foreign::Endianness::Big => Endian::Big
+    };
+    ENDIAN.sets(endian);
+    EHFRAME.sets(EhFrame::new(object));
+
+    load_source(dwarf.dwarf(endian));
+    parse_functions(dwarf.dwarf(endian));
+
+    DWARF.sets(dwarf);
+}
+
+fn panes_preload(state: &mut window::State) {
+    BREAKPOINTS.sets(Breakpoints::new());
+    let panes = &mut state.layout.panes;
+
+    let (comp_dir, main_file) = get_main_file();
+
+    for (_id, pane) in panes.iter_mut() {
+        match pane {
+            ui::Pane::Code(inner) => {
+                inner.dir = Some(comp_dir.clone());
+                inner.file = Some(main_file.clone());
+            },
+            _ => ()
+        }
+    }
+}
+
+fn tracee_setup(state: &mut window::State, pid: Pid) {
+    let proc_path = PathBuf::from(format!("/proc/{pid}/"));
+    state.status = Some(wait(pid).unwrap());
+    let path = get_tracee_path(&proc_path).unwrap();
+    FILE.sets(path.clone());
+
+    let maps = get_process_maps(&proc_path).unwrap();
+
+    for map in maps {
+        if map.name != path.to_str().unwrap() {
+            continue;
+        }
+        if map.permissions.x {
+            EXEC_SHIFT.sets(map.range.start - map.offset);
+            break;
+        }
+    };
+
+    MEMORY.sets(open_memory(&proc_path).unwrap());
+    PROC_PATH.sets(proc_path);
+    state.internal.stopped = true;
+
+    REGISTERS.sets(get_registers(pid).unwrap());
+
+    let panes = &mut state.layout.panes;
+
+    for (id, pane) in panes.iter_mut() {
+        match pane {
+            ui::Pane::Memory(inner) => {
+                inner.address = anti_normal(0);
+                inner.field = ui::Base::form(&ui::Base::Hex, anti_normal(0));
+                ui::update_memory(inner);
+            },
+            _ => ()
+        }
+    };
+}
+
+
+
+// Tracing Interface
 
 pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> {
     let mut path = proc_path.clone();
@@ -394,4 +557,8 @@ pub fn wait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
 
 pub fn testwait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
     nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG))
+}
+
+fn signal(pid: Pid, signal: Signal) -> Result<(), ()> {
+    signal::kill(pid, signal).map_err(|_| ())
 }

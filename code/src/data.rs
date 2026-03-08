@@ -55,6 +55,7 @@ const fn empty<T>() -> Global<T> {Mutex::new(None)}
 pub trait ImplGlobal<T> {
     fn access(&self) -> MutexGuard<'_, Option<T>>;
     fn sets(&self, new: T);
+    fn none(&self);
 }
 
 impl <T>ImplGlobal<T> for Global<T> {
@@ -63,6 +64,9 @@ impl <T>ImplGlobal<T> for Global<T> {
     }
     fn sets(&self, new: T) {
         *self.access() = Some(new);
+    }
+    fn none(&self) {
+        *self.access() = None;
     }
 }
 

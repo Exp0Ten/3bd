@@ -24,7 +24,7 @@ pub struct Layout {
     sidebar_right: bool,
     panel: bool,
     panel_mode: config::PanelMode,
-    panes: pane_grid::State<Pane>,
+    pub panes: pane_grid::State<Pane>,
     _focus: Option<pane_grid::Pane>
 }
 
@@ -675,7 +675,7 @@ impl Layout {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-enum Base {
+pub enum Base {
     #[default]
     Hex,
     Dec,
@@ -684,7 +684,7 @@ enum Base {
 }
 
 impl Base {
-    fn form(&self, num: u64) -> String {
+    pub fn form(&self, num: u64) -> String {
         match self {
             Self::Hex => format!("0x{:x}", num),
             Self::Dec => format!("{}", num),
@@ -777,10 +777,10 @@ impl Pane {
 }
 
 #[derive(Debug, Clone, Default)]
-struct PaneMemory {
-    field: String,
+pub struct PaneMemory {
+    pub field: String,
     incorrect: bool,
-    address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
+    pub address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
     read_address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
     data: Vec<u8>,
     more_bytes: bool, // 4 or 8
@@ -792,10 +792,10 @@ struct PaneMemory {
 struct PaneStack {} // TODO
 
 #[derive(Debug, Clone, Default)]
-struct PaneCode {
-    update: bool,
-    dir: Option<String>,
-    file: Option<String>
+pub struct PaneCode {
+    pub update: bool,
+    pub dir: Option<String>,
+    pub file: Option<String>
 }
 
 #[derive(Debug, Clone, Default)]
@@ -971,15 +971,21 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
             Some(address) => {
                 let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
                 button(
-                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data)).style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
+                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                .width(Length::Fill)
+                .height(Length::Fill)
                 ).style(style::breakpoint)
                 .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
-                .width(10)
-                .height(10)
+                .width(25)
+                .height(25)
+                .padding(7)
             },
-            None => button("").style(style::breakpoint)
+            None => button("")
+                .style(style::breakpoint)
+                .width(25)
+                .height(25)
         }
-        
     }
 
 
@@ -994,44 +1000,66 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
     dirs.sort();
 
-    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), |path| Message::Pane(PaneMessage::CodeSelectDir(id, path))).placeholder("Dir...");
+    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path))).placeholder("Dir...");
 
     let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap())].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
 
     files.sort();
 
-    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), |path| Message::Pane(PaneMessage::CodeSelectFile(id, path))).placeholder("File...");
+    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path))).placeholder("File...");
 
     let comp_path = PathBuf::from(pane.dir.clone().unwrap());
     let file_path = PathBuf::from(pane.file.clone().unwrap());
 
     let (file, index) = source.get_file(comp_path.clone(), file_path).unwrap();
-    let content = match &file.content {
-        Some(text) => text,
-        None => return program_message("File contents not loaded."),
+
+    let code = if let Some(content) = &file.content {
+        let lines: Vec<&str> = content.lines().collect();
+        let numbers: Vec<u64> = (0..lines.len()).map(|num| num as u64).collect();
+
+        let size = 25;
+
+        let addresses: Vec<Option<u64>> = numbers.iter().map(|num| {
+            let source_index = SourceIndex {
+                line: *num,
+                hash_path: comp_path.clone(),
+                index
+            };
+            let address = LINES.access().as_ref().unwrap().get_address(&source_index);
+            address
+        }).collect();
+
+        let breakpoints: iced::widget::Column<'_, Message> = column(addresses.iter().map(|address|
+            breakpoint_button(*address).into()
+        ));
+
+        let line_number: iced::widget::Column<'_, Message> = column(
+            numbers.iter().map(|num| 
+               text(num).size(size-8).height(size).center().into()
+            )
+        ).width(Length::Shrink).align_x(iced::Right);
+
+        let text: iced::widget::Column<'_, Message> = column(
+            lines.iter().map(|line|
+                text(String::from(*line)).wrapping(text::Wrapping::None).size(size-8).height(size).center().into()
+            )
+        );
+
+        container(
+            row![
+                breakpoints, line_number, text
+            ].spacing(5)
+            .padding(5)
+        ).style(style::back)
+    } else {
+        program_message("File contents not loaded.")
     };
 
-    let lines: Vec<&str> = content.lines().collect();
-    let numbers: Vec<u64> = (0..lines.len()).map(|num| num as u64).collect();
-
-    let addresses: Vec<Option<u64>> = numbers.iter().map(|num| {
-        let source_index = SourceIndex {
-            line: *num,
-            hash_path: comp_path.clone(),
-            index
-        };
-        let address = LINES.access().as_ref().unwrap().get_address(&source_index);
-        address
-    }).collect();
-
-    let breakpoints: iced::widget::Column<'_, Message> = column(addresses.iter().map(|address|
-        breakpoint_button(*address).into()
-    ));
-
-    let line_number: iced::widget::Column<'_, Message> = column(numbers.iter().map(|num| text(num).into()));
-    let text: iced::widget::Column<'_, Message> = column(lines.iter().map(|line| text(*line).into()));
     container(
-        column![]
+        column![
+            row![hash_list, file_list].spacing(10),
+            code
+        ]
     )
 }
 
@@ -1173,7 +1201,12 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
         bytesize
     ].spacing(2).padding(3).height(Length::Shrink);
 
-    let memory = if false {
+    let test = match test_memory(pane.address) {
+        Err(test) => test,
+        Ok(()) => false
+    };
+
+    let memory = if test {
         container(column![
             text("Read out of memory map bounds.").width(Length::Fill).center().style(style::error),
             container(button(text("Reload to begining of program map")).on_press(Message::Pane(PaneMessage::MemoryReset(id)))).width(Length::Fill).center_x(Length::Fill)
@@ -1536,13 +1569,12 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
     };
 }
 
-fn update_memory(pane: &mut PaneMemory) {
+pub fn update_memory(pane: &mut PaneMemory) {
     let current = pane.address;
     let limit = pane.read_address;
 
     match test_memory(current) {
         Err(true) => {
-            pane.data.clear();
             pane.read_error = true;
             return;
         },
@@ -1569,7 +1601,6 @@ fn update_memory(pane: &mut PaneMemory) {
 
     let data = read_memory(new, 4096);
     if data.is_err() { // some error idk
-        pane.data.clear();
         pane.read_error = true;
         return;
     }

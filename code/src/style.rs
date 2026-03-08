@@ -168,15 +168,15 @@ pub fn breakpoint(theme: &Theme, status: button::Status) -> button::Style {
 pub fn breakpoint_svg(theme: &Theme, status: svg::Status) -> svg::Style {
     svg::Style {
         color: match status {
-            svg::Status::Idle => Some(Color::TRANSPARENT),
-            svg::Status::Hovered => Some(theme.extended_palette().danger.base.color) // red, i mean maybe ill change it to some theme like color
+            svg::Status::Idle => Some(theme.extended_palette().background.base.color),
+            svg::Status::Hovered => Some(theme.extended_palette().danger.weak.color) // red, i mean maybe ill change it to some theme like color
         }
     }
 }
 
 pub fn breakpoint_svg_toggled(theme: &Theme, status: svg::Status) -> svg::Style {
     svg::Style {
-        color: Some(Color { r: 1., g: 0., b: 0., a: 1.0 })
+        color: Some(theme.extended_palette().danger.base.color)
     }
 }
 

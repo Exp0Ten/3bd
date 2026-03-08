@@ -23,7 +23,8 @@ pub struct App {
 #[derive(Default)]
 pub struct State {
     pub layout: Layout,
-    pub internal: Internal
+    pub internal: Internal,
+    pub status: Option<nix::sys::wait::WaitStatus>,
     // add more as needed
 }
 

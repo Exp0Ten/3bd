@@ -278,6 +278,31 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
     LINES.sets(line_addresses);
 }
 
+pub fn get_main_file() -> (String, String) {
+    find_main();
+    let mut ehframe_bind = EHFRAME.access();
+    let ehframe = ehframe_bind.as_mut().unwrap();
+    let symbol = ehframe.object.symbol_by_name("main").unwrap();
+    let address = object::ObjectSymbol::address(&symbol);
+
+    let lines_bind = LINES.access();
+    let index = lines_bind.as_ref().unwrap().get_line(address).unwrap();
+
+    let comp_dir = index.hash_path.clone();
+    let mut source_bind = SOURCE.access();
+    let file = source_bind.as_ref().unwrap().index_with_line(index).clone();
+    let file_path = file.path;
+
+    let mut path = comp_dir.clone();
+    path.push(file_path.clone());
+
+    if let Ok(text) = crate::object::read_source(&path) {
+        source_bind.as_mut().unwrap().get_mut(&comp_dir).unwrap().get_mut(index.index).unwrap().content = Some(text);
+    };
+
+    (String::from(comp_dir.to_str().unwrap()), String::from(file_path.to_str().unwrap()))
+}
+
 /*
 
 Okay, i spent WAY TOO LONG on this and i have to explain:

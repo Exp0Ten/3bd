@@ -48,14 +48,14 @@ fn tracee_program(file: &Path, args: Vec<String>, stdio: (Stdio, Stdio)) -> std:
     });
 
     //let a= process::Command::new(file.as_os_str())
-    process::Command::new("./a.out")
+    process::Command::new(file)
     .stdin(stdio.0)// TODO
     .stdout(stdio.1)
     .args(args)
     .exec()
 }
 
-fn test_file(file: &Path) -> Result<(), ()> { // True if it has DWARF, False if it doesnt, Err if invalid file
+pub fn test_file(file: &Path) -> Result<(), ()> { // True if it has DWARF, False if it doesnt, Err if invalid file
     let title = Some("Executable Error");
 
 
@@ -94,6 +94,8 @@ pub fn open_child_stdio() -> Result<(PipeReader, PipeWriter), ()> { //returns th
 
 pub fn close_child_stdio() -> Option<String> { // returns what was left in the pipes, should be empty, errors on none empty
     let mut stdio = STDIO.access();
+
+    if stdio.is_none() {return None;}
 
     let (stdin, stdout) = stdio.as_mut().unwrap();
     let mut text = String::new();
