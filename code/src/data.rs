@@ -24,7 +24,6 @@ pub static mut DATA: Vec<u8> = Vec::new(); //The file contents
 
 type Global<T> = Mutex<Option<T>>;
 
-//pub static INTERNAL: Mutex<Internal> = Mutex::new(Internal::empty());
 pub static CONFIG: Global<config::Config> = empty();
 pub static FILE: Global<std::path::PathBuf> = empty();
 pub static STDIO: Global<(PipeWriter, PipeReader)> = empty();

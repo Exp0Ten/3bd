@@ -2,15 +2,21 @@ use iced::{
     Task, Length,
     widget::{
         Container, Row, Theme,
-        button, column, container, mouse_area, pane_grid, row, svg, text,
-        svg::Handle
+        button, column, container, pane_grid, row, svg, text,
+        svg::Handle, pick_list, scrollable, text_input, mouse_area
     },
-    padding
+    padding, font
 };
 
+use std::path::PathBuf;
+
+use nix::sys::signal::Signal;
+
 use crate::{
-    window::*, data::*, trace::*, style, config
+    window::*, data::*, trace::*, style, config, dwarf::*, object
 };
+
+const BOLD: font::Font = font::Font {weight: font::Weight::ExtraBold, ..font::Font::DEFAULT};
 
 pub struct Layout {
     status_bar: bool,
@@ -668,6 +674,43 @@ impl Layout {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+enum Base {
+    #[default]
+    Hex,
+    Dec,
+    Oct,
+    Bin,
+}
+
+impl Base {
+    fn form(&self, num: u64) -> String {
+        match self {
+            Self::Hex => format!("0x{:x}", num),
+            Self::Dec => format!("{}", num),
+            Self::Oct => format!("0o{:o}", num),
+            Self::Bin => format!("0b{:b}", num),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+enum ByteBase {
+    #[default]
+    Hex,
+    Dec,
+    Chr
+}
+
+impl ByteBase {
+    fn form(&self, num: u8) -> String {
+        match self {
+            Self::Hex => format!("{:02x}", num),
+            Self::Dec => format!("{}", num),
+            Self::Chr => format!("'{:}'", if num.is_ascii_graphic() {num as char} else {' '}),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
@@ -682,36 +725,86 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     _Empty //just in case
 }
 
+impl Pane {
+    fn memory(&mut self) -> &mut PaneMemory {
+        match self {
+            Pane::Memory(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn code(&mut self) -> &mut PaneCode {
+        match self {
+            Pane::Code(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn registers(&mut self) -> &mut PaneRegisters {
+        match self {
+            Pane::Registers(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn control(&mut self) -> &mut PaneControl {
+        match self {
+            Pane::Control(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn info(&mut self) -> &mut PaneInfo {
+        match self {
+            Pane::Info(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn terminal(&mut self) -> &mut PaneTerminal {
+        match self {
+            Pane::Terminal(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn stack(&mut self) -> &mut PaneStack {
+        match self {
+            Pane::Stack(inner) => inner,
+            _ => panic!()
+        }
+    }
+    fn assembly(&mut self) -> &mut PaneAssembly {
+        match self {
+            Pane::Assembly(inner) => inner,
+            _ => panic!()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct PaneMemory {
-    address: u64, // where are we in memory, we read extra 1KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
-    bytes_per_row: u8, //min 4, max 16
-    binary_display: bool,
-    read_error: bool, // if read error occurs, show a button to take the user back (resets the address to a correct map)
-    _selected: Select, // TODO feature
-    //_colored: HashMap<MemColor, Select>, // TODO feature
+    field: String,
+    incorrect: bool,
+    address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
+    read_address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
+    data: Vec<u8>,
+    more_bytes: bool, // 4 or 8
+    format: ByteBase,
+    read_error: bool // if read error occurs, show a button to take the user back (resets the address to a correct map)
 }
-
-#[derive(Debug, Clone, Default)]
-struct Select {
-    address: u64,
-    range: Option<u32> // option only for writing purposes
-}
-
-//#[derive(Debug, Clone)]
-//enum MemColor {} // TODO feature
 
 #[derive(Debug, Clone, Default)]
 struct PaneStack {} // TODO
 
 #[derive(Debug, Clone, Default)]
-struct PaneCode {}
+struct PaneCode {
+    update: bool,
+    dir: Option<String>,
+    file: Option<String>
+}
 
 #[derive(Debug, Clone, Default)]
 struct PaneAssembly {} // TODO
 
 #[derive(Debug, Clone, Default)]
-struct PaneRegisters {} //TODO
+struct PaneRegisters {
+    pub format: Base
+}
 
 #[derive(Debug, Clone, Default)]
 struct PaneInfo {} // TODO
@@ -725,7 +818,7 @@ struct PaneTerminal {
 }
 
 #[derive(Debug, Clone)]
-pub enum PaneMessage {
+pub enum LayoutMessage {
     SidebarLeftToggle,
     SidebarRightToggle,
     PanelToggle,
@@ -734,7 +827,20 @@ pub enum PaneMessage {
     Resize(pane_grid::ResizeEvent),
 }
 
-
+#[derive(Debug, Clone)]
+pub enum PaneMessage {
+    RegistersChangeFormat(pane_grid::Pane, Base),
+    CodeSelectDir(pane_grid::Pane, String),
+    CodeSelectFile(pane_grid::Pane, String),
+    MemoryChangeFormat(pane_grid::Pane, ByteBase),
+    MemoryToggleSize(pane_grid::Pane),
+    MemoryInput(pane_grid::Pane, String),
+    MemorySubmit(pane_grid::Pane),
+    MemoryUpdate(pane_grid::Pane),
+    MemoryPaste(pane_grid::Pane, String),
+    MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), //the i8 is as a signed multiplier, mirroring the axis
+    MemoryReset(pane_grid::Pane)
+}
 
 pub fn content(state: &State) -> Container<'_, Message> {
     container(column(
@@ -758,17 +864,17 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
         let sidebar_left = svg_button("icons/sidebar_left.svg", size,
         Some(if state.layout.sidebar_left {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.sidebar_left {style::bar_button_toggled} else {style::bar_button})
-        .on_press(Message::Pane(PaneMessage::SidebarLeftToggle));
+        .on_press(Message::Layout(LayoutMessage::SidebarLeftToggle));
 
         let sidebar_right = svg_button("icons/sidebar_right.svg", size,
         Some(if state.layout.sidebar_right {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.sidebar_right {style::bar_button_toggled} else {style::bar_button})
-        .on_press(Message::Pane(PaneMessage::SidebarRightToggle));
+        .on_press(Message::Layout(LayoutMessage::SidebarRightToggle));
 
         let panel = svg_button("icons/panel.svg", size,
         Some(if state.layout.panel {style::bar_svg_toggled} else {style::bar_svg})
         ).style(if state.layout.panel {style::bar_button_toggled} else {style::bar_button})
-        .on_press(Message::Pane(PaneMessage::PanelToggle));
+        .on_press(Message::Layout(LayoutMessage::PanelToggle));
 
         [load_file, sidebar_left, sidebar_right, panel] //extend if needed
     }
@@ -803,7 +909,6 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 }
 
 fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
-
     container(row![
         text("Program State | Program Position | Backtrace ...").size((height-7) as f32)
     ]).height(Length::Fixed(height as f32))
@@ -817,25 +922,25 @@ fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
         pane_grid(&state.layout.panes, |id, pane, _maximized| pane_view(id, pane, state)).spacing(10)
         .width(Length::Fill)
         .height(Length::Fill)
-        .on_click(|pane| Message::Pane(PaneMessage::_Focus(pane)))
-        .on_drag(|drag_event| Message::Pane(PaneMessage::Drag(drag_event)))
-        .on_resize(10, |resize_event| Message::Pane(PaneMessage::Resize(resize_event)))
+        .on_click(|pane| Message::Layout(LayoutMessage::_Focus(pane)))
+        .on_drag(|drag_event| Message::Layout(LayoutMessage::Drag(drag_event)))
+        .on_resize(10, |resize_event| Message::Layout(LayoutMessage::Resize(resize_event)))
         .spacing(2)
     ).center(Length::Fill)
     .width(Length::Fill)
     .height(Length::Fill)
 }
 
-fn pane_view<'a>(id: pane_grid::Pane, pane: &Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
+fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
     let (content, titlebar) = match pane {
-        Pane::Code(state) => (pane_view_code(state), pane_titlebar("Code", "icons/pane_source.svg")),
-        Pane::Control(state) => (pane_view_control(state), pane_titlebar("Control", "icons/pane_control.svg")),
-        Pane::Memory(state) => (pane_view_memory(state), pane_titlebar("Memory", "icons/pane_memory.svg")),
-        Pane::Stack(state) => (pane_view_stack(state), pane_titlebar("CallStack", "icons/pane_stack.svg")),
-        Pane::Registers(state) => (pane_view_registers(state), pane_titlebar("Registers", "icons/pane_registers.svg")),
-        Pane::Assembly(state) => (pane_view_assembly(state), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
-        Pane::Terminal(state) => (pane_view_terminal(state), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
-        Pane::Info(state) => (pane_view_info(state), pane_titlebar("ELF Info", "icons/pane_info.svg")),
+        Pane::Code(pane) => (pane_view_code(pane, state, id), pane_titlebar("Code", "icons/pane_source.svg")),
+        Pane::Control(pane) => (pane_view_control(pane, state), pane_titlebar("Control", "icons/pane_control.svg")),
+        Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
+        Pane::Stack(pane) => (pane_view_stack(pane), pane_titlebar("CallStack", "icons/pane_stack.svg")),
+        Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
+        Pane::Assembly(pane) => (pane_view_assembly(pane), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
+        Pane::Terminal(pane) => (pane_view_terminal(pane), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
+        Pane::Info(pane) => (pane_view_info(pane), pane_titlebar("ELF Info", "icons/pane_info.svg")),
 
         _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
     };
@@ -860,72 +965,455 @@ fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, M
     ).style(style::pane_title)
 }
 
-fn pane_view_code<'a>(state: &PaneCode) -> Container<'a, Message> {
-    let content = container(text("CODE"));
-    content
+fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+    fn breakpoint_button<'a>(address: Option<u64>) -> button::Button<'a, Message> {
+        match address {
+            Some(address) => {
+                let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
+                button(
+                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data)).style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                ).style(style::breakpoint)
+                .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
+                .width(10)
+                .height(10)
+            },
+            None => button("").style(style::breakpoint)
+        }
+        
+    }
+
+
+    let bind = SOURCE.access();
+    if bind.is_none() {
+        return program_message("Load the program to display source code.");
+    };
+
+    let source = bind.clone().unwrap();
+
+    let mut dirs: Vec<String> = source.keys().map(|path| String::from(path.to_str().unwrap())).collect();
+
+    dirs.sort();
+
+    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), |path| Message::Pane(PaneMessage::CodeSelectDir(id, path))).placeholder("Dir...");
+
+    let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap())].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
+
+    files.sort();
+
+    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), |path| Message::Pane(PaneMessage::CodeSelectFile(id, path))).placeholder("File...");
+
+    let comp_path = PathBuf::from(pane.dir.clone().unwrap());
+    let file_path = PathBuf::from(pane.file.clone().unwrap());
+
+    let (file, index) = source.get_file(comp_path.clone(), file_path).unwrap();
+    let content = match &file.content {
+        Some(text) => text,
+        None => return program_message("File contents not loaded."),
+    };
+
+    let lines: Vec<&str> = content.lines().collect();
+    let numbers: Vec<u64> = (0..lines.len()).map(|num| num as u64).collect();
+
+    let addresses: Vec<Option<u64>> = numbers.iter().map(|num| {
+        let source_index = SourceIndex {
+            line: *num,
+            hash_path: comp_path.clone(),
+            index
+        };
+        let address = LINES.access().as_ref().unwrap().get_address(&source_index);
+        address
+    }).collect();
+
+    let breakpoints: iced::widget::Column<'_, Message> = column(addresses.iter().map(|address|
+        breakpoint_button(*address).into()
+    ));
+
+    let line_number: iced::widget::Column<'_, Message> = column(numbers.iter().map(|num| text(num).into()));
+    let text: iced::widget::Column<'_, Message> = column(lines.iter().map(|line| text(*line).into()));
+    container(
+        column![]
+    )
 }
 
-fn pane_view_control<'a>(state: &PaneControl) -> Container<'a, Message> {
+fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, Message> {
     let size = 30;
 
     let file = FILE.access().is_some();
-    let running = PID.access().is_some();
+    let run = PID.access().is_some();
+    let stopped = state.internal.stopped;
 
-    let start_stop = if running {
+    let start_stop = if run {
         svg_button("icons/stop.svg", size, Some(style::widget_svg))
         .style(style::widget_button)
         .on_press(Message::Operation(Operation::StopTracee))
     } else {
-        svg_button("icons/run.svg", size, Some(style::widget_svg))
+        svg_button("icons/run.svg", size, Some(if file {style::widget_svg} else {style::button_svg_disabled}))
         .style(style::widget_button)
-        .on_press(Message::Operation(Operation::RunTracee))
+        .on_press_maybe(if file {Some(Message::Operation(Operation::RunTracee))} else {None})
     };
 
-    let pause = svg_button("icons/pause.svg", size, Some(style::bar_svg))
-    .on_press_maybe(if running {Some(Message::Operation(Operation::StopTracee))} else {None})
+    let pause_cont = if stopped {
+        svg_button("icons/continue.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+        .on_press_maybe(if run {Some(Message::Operation(Operation::Continue))} else {None})
+        .style(style::widget_button)
+    } else {
+        svg_button("icons/pause.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+        .on_press_maybe(if run {Some(Message::Operation(Operation::Pause))} else {None})
+        .style(style::widget_button)
+    };
+
+    let step = svg_button("icons/step.svg", size, Some(if stopped {style::bar_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
     .style(style::widget_button);
 
-    let step = svg_button("icons/pause.svg", size, Some(style::bar_svg))
-    .on_press_maybe(if running {Some(Message::Operation(Operation::StopTracee))} else {None})
+    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped {style::bar_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if stopped {Some(Message::Operation(Operation::SourceStep))} else {None})
     .style(style::widget_button);
 
-    //let cont = ;
+    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::bar_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
+    .style(style::widget_button);
 
-    //let signal = ;
+    let signal = svg_button("icons/signal.svg", size, Some(if run & state.internal.selected_signal.is_some() {style::bar_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if run & state.internal.selected_signal.is_some() {Some(Message::Operation(Operation::Signal))} else {None})
+    .style(style::widget_button);
+
+    let signals = [
+        Signal::SIGKILL,
+        Signal::SIGINT,
+        Signal::SIGQUIT,
+        Signal::SIGHUP,
+        Signal::SIGTRAP,
+        Signal::SIGCONT,
+        Signal::SIGABRT,
+        Signal::SIGFPE,
+        Signal::SIGUSR1,
+        Signal::SIGUSR2,
+        Signal::SIGSEGV,
+        Signal::SIGTERM,
+        Signal::SIGCHLD,
+        Signal::SIGSTOP,
+        Signal::SIGTSTP,
+    ];
+
+    let select = pick_list(signals, state.internal.selected_signal, |signal| Message::Operation(Operation::SignalSelect(signal)))
+    .placeholder("Signal...");
 
     let content = container(row![
         start_stop,
-        pause
-    ]);
+        pause_cont,
+        step,
+        source_step,
+        kill,
+        signal,
+        select
+    ].padding(3)).style(style::back).width(Length::Fill);
     content
 }
 
-fn pane_view_memory<'a>(state: &PaneMemory) -> Container<'a, Message> {
+fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<'a, Message> {
+    if MEMORY.access().is_none() {
+        return program_message("Start the program to display memory.");
+    };
+
+    let size = 30;
+
+    let button_hex: button::Button<'_, Message> = button(
+        text("0x").center().font(BOLD).size(size - 12)
+        .style(if pane.format == ByteBase::Hex {style::widget_text_toggled} else {style::widget_text})
+    ).padding(0)
+    .height(size)
+    .width(size)
+    .style(if pane.format == ByteBase::Hex {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Hex)));
+
+    let button_dec: button::Button<'_, Message> = button(
+        text("10").center().font(BOLD).size(size - 12)
+        .style(if pane.format == ByteBase::Dec {style::widget_text_toggled} else {style::widget_text})
+    ).padding(0)
+    .height(size)
+    .width(size)
+    .style(if pane.format == ByteBase::Dec {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Dec)));
+
+    let button_chr: button::Button<'_, Message> = button(
+        text("A").center().font(BOLD).size(size - 12)
+        .style(if pane.format == ByteBase::Chr {style::widget_text_toggled} else {style::widget_text})
+    ).padding(0)
+    .height(size)
+    .width(size)
+    .style(if pane.format == ByteBase::Chr {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Chr)));
+
+    let bytesize: button::Button<'_, Message> = button(
+        text(if pane.more_bytes {"8"} else {"4"}).center().size(size - 12).style(style::widget_text)
+    )
+    .padding(0)
+    .height(size)
+    .width(size)
+    .style(style::widget_button)
+    .on_press(Message::Pane(PaneMessage::MemoryToggleSize(id)));
+
+    let address: text_input::TextInput<'_, Message> = text_input("0x...", &pane.field)
+    .on_input(move |data| Message::Pane(PaneMessage::MemoryInput(id, data)))
+    .on_submit(Message::Pane(PaneMessage::MemorySubmit(id)))
+    .on_paste(move |data| Message::Pane(PaneMessage::MemoryPaste(id, data)))
+    .size(size - 12)
+    .line_height(iced::Pixels(size as f32 - 10.))
+    .width(Length::Fill)
+    .style(|theme, status| style::address(theme, status, pane.incorrect));
+
+    let field = row![
+        text("Address:").size(size - 12).center().height(size),
+        container(mouse_area(address).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, 1)))).width(Length::FillPortion(4)),
+        widget_fill(),
+        button_hex,
+        button_dec,
+        button_chr,
+        bytesize
+    ].spacing(2).padding(3).height(Length::Shrink);
+
+    let memory = if false {
+        container(column![
+            text("Read out of memory map bounds.").width(Length::Fill).center().style(style::error),
+            container(button(text("Reload to begining of program map")).on_press(Message::Pane(PaneMessage::MemoryReset(id)))).width(Length::Fill).center_x(Length::Fill)
+        ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
+    } else {
+        let data: &Vec<u8>= &pane.data;
+
+        let mut addresses: Vec<u64> = Vec::new();
+        let mut bytes: Vec<Vec<u8>> = if pane.more_bytes {
+            vec![Vec::new(); 8]
+        } else {
+            vec![Vec::new(); 4]
+        };
+
+        let len = bytes.len();
+        let mut pointer = pane.address - pane.address % len as u64;
+        let start = pointer - pane.read_address;
+
+        for (i, byte) in data[start as usize..].iter().enumerate() {
+            if i % len == 0 {
+                addresses.push(pointer);
+                pointer += len as u64;
+            };
+
+            bytes[i % len].push(*byte);
+            if i == 40*len - 1 { // 40 lines
+                break;
+            }
+        };
+
+        let size = 25;
+
+        let address_column: iced::widget::Column<'_, Message> = column(
+            addresses.iter().map(|addr| text(
+                format!("0x...{:06x}", addr)
+            ).size(size - 5)
+            .height(size)
+            .center()
+            .style(style::weak)
+            .into())
+        );
+
+        let byte_columns: iced::widget::Row<'_, Message> = row(bytes.iter().map(|col| column(
+            col.iter().map(|byte| text(
+                pane.format.form(*byte)
+            ).size(size - 5)
+            .height(size)
+            .center()
+            .style(style::widget_text)
+            .into())
+        ).into()))
+        .spacing(match pane.format {
+            ByteBase::Hex => 10,
+            ByteBase::Chr => 15,
+            ByteBase::Dec => 20
+        });
+
+        container(mouse_area(
+            row![address_column, byte_columns]
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .padding(5)
+            .spacing(20)
+        ).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, -3))))
+    };
+
+    let content = container(column![
+        field,
+        memory
+    ]).style(style::back);
+    content
+}
+
+fn pane_view_stack<'a>(pane: &PaneStack) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
     content
 }
 
-fn pane_view_stack<'a>(state: &PaneStack) -> Container<'a, Message> {
+fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+    fn flags(num: u64) -> String {
+        let mut buf = String::new();
+        if num & (1 << 11) != 0 {
+            buf.push_str("|OF");
+        };
+        if num & (1 << 10) != 0 {
+            buf.push_str("|DF");
+        };
+        if num & (1 << 7) != 0 {
+            buf.push_str("|SF");
+        };
+        if num & (1 << 6) != 0 {
+            buf.push_str("|ZF");
+        };
+        if num & (1 << 4) != 0 {
+            buf.push_str("|AF");
+        };
+        if num & (1 << 2) != 0 {
+            buf.push_str("|PF");
+        };
+        if num & (1) != 0 {
+            buf.push_str("|CF");
+        };
+
+        if buf.len() > 0 {
+            buf.push('|');
+        };
+        buf
+    }
+
+    let size = 30;
+
+    let button_hex: button::Button<'_, Message> = button(
+        text("0x").center().font(BOLD).size(size - 12)
+        .style(if pane.format == Base::Hex {style::widget_text_toggled} else {style::widget_text})
+    ).padding(0)
+    .height(size)
+    .width(size)
+    .style(if pane.format == Base::Hex {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Hex)));
+
+    let button_dec: button::Button<'_, Message> = button(
+        text("10").center().font(BOLD).size(size - 12)
+        .style(if pane.format == Base::Dec {style::widget_text_toggled} else {style::widget_text})
+    ).padding(4)
+    .height(size)
+    .width(size)
+    .style(if pane.format == Base::Dec {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Dec)));
+
+    let button_oct: button::Button<'_, Message> = button(
+        text("0o").center().font(BOLD).size(size - 12)
+        .style(if pane.format == Base::Oct {style::widget_text_toggled} else {style::widget_text})
+    ).padding(4)
+    .height(size)
+    .width(size)
+    .style(if pane.format == Base::Oct {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Oct)));
+
+    let button_bin: button::Button<'_, Message> = button(
+        text("0b").center().font(BOLD).size(size - 12)
+        .style(if pane.format == Base::Bin {style::widget_text_toggled} else {style::widget_text})
+    ).padding(4)
+    .height(size)
+    .width(size)
+    .style(if pane.format == Base::Bin {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Bin)));
+
+    let regs = REGISTERS.access().clone();
+
+    let (reg, value) = match regs {
+        Some(regs) => ([
+            "RIP:",
+            "RAX:",
+            "RBX:",
+            "RCX:",
+            "RDX:",
+            "RSI:",
+            "RDI:",
+            "RBP:",
+            "RSP:",
+            "R8:",
+            "R9:",
+            "R10:",
+            "R11:",
+            "R12:",
+            "R13:",
+            "R14:",
+            "R15:",
+            "RFS:",
+            "CS:",
+            "SS:",
+            "DS:",
+            "ES:",
+            "FS:",
+            "GS:",
+            "FSB:",
+            "GSB:"
+        ], [
+        regs.rip,
+        regs.rax,
+        regs.rbx,
+        regs.rcx,
+        regs.rdx,
+        regs.rsi,
+        regs.rdi,
+        regs.rbp,
+        regs.rsp,
+        regs.r8,
+        regs.r9,
+        regs.r10,
+        regs.r11,
+        regs.r12,
+        regs.r13,
+        regs.r14,
+        regs.r15,
+        regs.eflags,
+        regs.cs,
+        regs.ss,
+        regs.ds,
+        regs.es,
+        regs.fs,
+        regs.gs,
+        regs.fs_base,
+        regs.gs_base
+        ]),
+        None => return program_message("Start the program to display registers.")
+    };
+
+    let mut counter = 0;
+
+    let reg_lines = column(reg.map(|name| text(name).center().size(18).wrapping(text::Wrapping::None).into()));
+    let value_lines = column(value.map(|num|
+        if counter == 17 {
+            counter += 1;
+            text(format!("{}   {}", pane.format.form(num), flags(num))).center().size(18).style(style::widget_text).wrapping(text::Wrapping::None).into()
+        } else {
+            counter += 1;
+            text(pane.format.form(num)).center().size(18).style(style::widget_text).wrapping(text::Wrapping::None).into()
+        }
+    )).clip(true);
+
+
+    let content = container(column![
+        row![button_hex, button_dec, button_oct, button_bin].padding(3).spacing(3),
+        scrollable(row![reg_lines, value_lines].padding(5).spacing(10)).width(Length::Fill).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new().scroller_width(0).width(0) })
+    ]).style(style::back);
+    content
+}
+
+fn pane_view_assembly<'a>(pane: &PaneAssembly) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
     content
 }
 
-fn pane_view_registers<'a>(state: &PaneRegisters) -> Container<'a, Message> {
+fn pane_view_terminal<'a>(pane: &PaneTerminal) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
     content
 }
 
-fn pane_view_assembly<'a>(state: &PaneAssembly) -> Container<'a, Message> {
-    let content = container(text("TERMINAL"));
-    content
-}
-
-fn pane_view_terminal<'a>(state: &PaneTerminal) -> Container<'a, Message> {
-    let content = container(text("TERMINAL"));
-    content
-}
-
-fn pane_view_info<'a>(state: &PaneInfo) -> Container<'a, Message> {
+fn pane_view_info<'a>(pane_grid: &PaneInfo) -> Container<'a, Message> {
     let content = container(text("INFO"));
     content
 }
@@ -935,21 +1423,177 @@ fn pane_view_info<'a>(state: &PaneInfo) -> Container<'a, Message> {
 
 //message Handle
 
-pub fn pane_message(state: &mut State, pane: PaneMessage) {
-    match pane {
-        PaneMessage::SidebarLeftToggle => layout(&mut state.layout, pane),
-        PaneMessage::SidebarRightToggle => layout(&mut state.layout, pane),
-        PaneMessage::PanelToggle => layout(&mut state.layout, pane),
+pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
+    let panes = &mut state.layout.panes;
+    let get_pane = |panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane| panes.get_mut(pane).unwrap();
 
-        PaneMessage::_Focus(pane) =>   state.layout._focus = Some(pane),
-        PaneMessage::Drag(pane_grid::DragEvent::Dropped {pane, target}) => {
+    match message {
+        PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
+        PaneMessage::CodeSelectDir(pane, dir) => get_pane(panes, pane).code().dir = Some(dir),
+        PaneMessage::CodeSelectFile(pane, file) => {
+            let data = get_pane(panes, pane).code();
+            data.file = Some(file.clone()); //file select
+
+            let comp_dir = PathBuf::from(data.dir.clone().unwrap());
+            let file_path = PathBuf::from(file);
+            let bind = SOURCE.access();
+            let source = bind.as_ref().unwrap();
+            let code = source.get_file(comp_dir.clone(), file_path.clone()).unwrap();
+            if code.0.content.is_some() { //Conditional file load
+                return;
+            };
+            let index = code.1;
+            drop(bind);
+            let mut path = comp_dir.clone();
+            path.push(file_path);
+            if let Ok(file) = object::read_source(&path) {
+                let mut bind = SOURCE.access();
+                let source = bind.as_mut().unwrap();
+                source.get_mut(&comp_dir).unwrap().get_mut(index).unwrap().content = Some(file);
+            };
+        },
+        PaneMessage::MemoryChangeFormat(pane, base) => get_pane(panes, pane).memory().format = base,
+        PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
+        PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
+        PaneMessage::MemorySubmit(pane) => {
+            let data = get_pane(panes, pane).memory();
+            let field = &data.field;
+            let hex = u64::from_str_radix(field.get(2..).unwrap_or("g"), 16);
+            let dec = u64::from_str_radix(field, 10);
+            if hex.is_err() && dec.is_err() {
+                data.incorrect = true;
+                return;
+            };
+            let num = match hex {
+                Ok(num) => num,
+                Err(_) => dec.unwrap()
+            };
+            data.address = num;
+            data.incorrect = false;
+            update_memory(data);
+        },
+        PaneMessage::MemoryAddress(pane, delta, mult) => {
+            let data = get_pane(panes, pane).memory();
+            let y = match delta {
+                iced::mouse::ScrollDelta::Lines { x, y } => y*mult as f32,
+                iced::mouse::ScrollDelta::Pixels { x, y } => y*mult as f32,
+            };
+            if data.more_bytes {
+                let round = data.address % (8*mult.abs() as u64);
+                if y > 0. {
+                    data.address = data.address + 8*mult.abs() as u64 - (data.address % (8*mult.abs() as u64)) ;
+                };
+                if y < 0. {
+                    if data.address < 8*mult.abs() as u64 {
+                        data.address = 0;
+                    } else {
+                        if round != 0 {
+                            data.address -= round;
+                        } else {
+                            data.address = data.address - 8*mult.abs() as u64;
+                        }
+                    }
+                }
+            } else {
+                let round = data.address % (4*mult.abs() as u64);
+                if y > 0. {
+                    data.address = data.address + 4*mult.abs() as u64 - data.address % (4*mult.abs() as u64);
+                };
+                if y < 0. {
+                    if data.address < 4*mult.abs() as u64 {
+                        data.address = 0
+                    } else {
+                        if round != 0 {
+                            data.address -= round;
+                        } else {
+                            data.address = data.address - (data.address %(4*mult.abs() as u64)) - 4*mult.abs() as u64;
+                        }
+                    }
+                }
+            };
+            let hex_check = data.field.get(0..2);
+            if hex_check.is_none() || hex_check.unwrap() == "0x" {
+                data.field = format!("0x{:x}",data.address);
+            } else {
+                data.field = format!("{}",data.address);
+            }
+            data.incorrect = false;
+            update_memory(data);
+        },
+        PaneMessage::MemoryReset(pane) => {
+            let data = get_pane(panes, pane).memory();
+            data.address = anti_normal(0);
+            let hex_check = data.field.get(0..2);
+            if hex_check.is_none() || hex_check.unwrap() == "0x" {
+                data.field = format!("0x{:x}",data.address);
+            } else {
+                data.field = format!("{}",data.address);
+            }
+            data.incorrect = false;
+            update_memory(data);
+        },
+        _ => ()
+    };
+}
+
+fn update_memory(pane: &mut PaneMemory) {
+    let current = pane.address;
+    let limit = pane.read_address;
+
+    match test_memory(current) {
+        Err(true) => {
+            pane.data.clear();
+            pane.read_error = true;
+            return;
+        },
+        _ => ()
+    };
+
+    let mut new = if (current < limit + 4096 / 8) || (current > limit + 7*(4096 / 8)) {
+        (current - current % 8) - 2048 // radius
+    } else {
+        return; // we are still well within the bounds so no need to reload the data
+    };
+
+    match test_memory(new) {
+        Err(true) => new = get_map_range(current).unwrap().start,
+        Err(false) => new = get_map_range(current).unwrap().end - 4096,
+        Ok(()) => ()
+    };
+
+    if new == limit {
+        return; // we have already done this
+    };
+
+    pane.read_address = new;
+
+    let data = read_memory(new, 4096);
+    if data.is_err() { // some error idk
+        pane.data.clear();
+        pane.read_error = true;
+        return;
+    }
+
+    pane.read_error = false;
+    pane.data = data.unwrap();
+}
+
+
+pub fn layout_message(state: &mut State, message: LayoutMessage) {
+    match message {
+        LayoutMessage::SidebarLeftToggle => layout(&mut state.layout, message),
+        LayoutMessage::SidebarRightToggle => layout(&mut state.layout, message),
+        LayoutMessage::PanelToggle => layout(&mut state.layout, message),
+
+        LayoutMessage::_Focus(pane) =>   state.layout._focus = Some(pane),
+        LayoutMessage::Drag(pane_grid::DragEvent::Dropped {pane, target}) => {
             match target {
                 pane_grid::Target::Pane(target_pane, _) => state.layout.panes.swap(pane, target_pane),
                 //pane_grid::Target::Edge(edge) => state.layout.panes.drop(pane, pane_grid::Target::Edge(edge))
                 _ => ()
             };
         }
-        PaneMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
+        LayoutMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
             //state.layout.panes.resize(split, ratio)
             resize(&mut state.layout, split, ratio);
         }
@@ -958,7 +1602,7 @@ pub fn pane_message(state: &mut State, pane: PaneMessage) {
     };
 }
 
-fn layout(layout: &mut Layout, pane: PaneMessage) {
+fn layout(layout: &mut Layout, pane: LayoutMessage) {
     let (main, left, right, panel) = layout.get_nodes();
     let mut saved_state = SAVED_STATE.access().clone().unwrap();
 
@@ -977,9 +1621,9 @@ fn layout(layout: &mut Layout, pane: PaneMessage) {
     };
 
     match pane {
-        PaneMessage::SidebarLeftToggle => layout.sidebar_left ^= true,
-        PaneMessage::SidebarRightToggle => layout.sidebar_right ^= true,
-        PaneMessage::PanelToggle => {
+        LayoutMessage::SidebarLeftToggle => layout.sidebar_left ^= true,
+        LayoutMessage::SidebarRightToggle => layout.sidebar_right ^= true,
+        LayoutMessage::PanelToggle => {
             if layout.panel_mode == config::PanelMode::left {
                 if layout.panel {
                     let new_left_ratio = (saved_state.left_sidebar.1 as f64)*(saved_state.right_sidebar.1 as f64);
@@ -1058,7 +1702,7 @@ fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big res
 }
 // NOTE: this is ofc only done for the sidebars, actually the correct way to do this for any pane is to find the next inner split (by recursing throught b) to find the first split that uses the SAME axis, then apply this logic for it. i might do that at some point
 
-fn limit(ratio: f32) -> f32 { // this is not up for debate, this is to prevent some WEIRD graphics to appear
+fn limit(ratio: f32) -> f32 { // this is not a user function, but to prevent some WEIRD graphics from appearing
     if ratio > 0.9 {
         0.9
     } else if  ratio < 0.1 {
@@ -1090,4 +1734,9 @@ fn delimiter<'a>(width: usize) -> Container<'a, Message> {
     container(text("|")).width(Length::Fixed(width as f32)).height(Length::Fill)
 }
 
-// 
+fn program_message<'a>(msg: &'a str) -> Container<'a, Message> {
+    container(text(msg).center().height(Length::Fill).width(Length::Fill))
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .style(style::back)
+}

@@ -82,7 +82,7 @@ pub struct MemoryMap {
     pub offset: u64,               // into file
 }
 
-pub enum Register { // only general purpose for now
+pub enum Register {
     RAx(u64),
     RBx(u64),
     RCx(u64),
@@ -108,13 +108,30 @@ pub enum Operation {
     ReloadFile,
     RunTracee,
     StopTracee,
-    Pause
+    Step,
+    SourceStep,
+    Pause,
+    Continue,
+    Kill,
+    Signal,
+    SignalSelect(nix::sys::signal::Signal),
+    BreakpointAdd(u64),
+    BreakpointRemove(u64),
     //fill as needed
 }
 
 pub fn operation_message(state: &mut window::State, operation: Operation) {
     match operation {
-        Operation::LoadFile => {Dialog::file(None, None);}, //TODO async
+        Operation::LoadFile => {Dialog::file(None, None);}, //FEATURE async?
+        Operation::RunTracee => {},
+        Operation::StopTracee => {},
+        Operation::Step => {},
+        Operation::SourceStep => {},
+        Operation::Pause => {},
+        Operation::Continue => {},
+        Operation::Kill => {},
+        Operation::Signal => {},
+        Operation::SignalSelect(signal) => {state.internal.selected_signal = Some(signal)},
         _ => ()
     }
 }
@@ -187,6 +204,16 @@ pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
         });
     };
     Ok(mmap_vector)
+}
+
+pub fn get_map_range(address: u64) -> Option<std::ops::Range<u64>> {
+    let maps = get_process_maps(PROC_PATH.access().as_ref().unwrap()).unwrap();
+    for map in maps {
+        if map.range.contains(&address) {
+            return Some(map.range);
+        }
+    };
+    None
 }
 
 pub fn get_tracee_path(proc_path: &PathBuf) -> Result<PathBuf, ()> {
@@ -320,6 +347,18 @@ fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> {
         Ok(_) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not seek into the memory file: {}", err), Some("Memory error")); Err(())}
     }
+}
+
+pub fn test_memory(address: u64) -> Result<(), bool> { // if Err(true) -> start, if Err(false) -> End, if Ok() then we are in valid memory space
+    match get_map_range(address) {
+        Some(_) => (),
+        None => return Err(true)
+    };
+    match get_map_range(address + 2048) {
+        Some(_) => (),
+        None => return Err(false)
+    };
+    Ok(())
 }
 
 pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {

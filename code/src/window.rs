@@ -29,11 +29,14 @@ pub struct State {
 
 #[derive(Debug, Default)]
 pub struct Internal {
-    
+    pub stopped: bool,
+    pub selected_signal: Option<nix::sys::signal::Signal>,
+    pub file: Option<crate::dwarf::SourceIndex>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Layout(LayoutMessage),
     Pane(PaneMessage),
     Operation(trace::Operation),
     None
@@ -42,7 +45,6 @@ pub enum Message {
 
 pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
-    //.theme(App::theme)
     .theme(App::theme)
     .window(App::default().settings)
 //    .subscription() //probably will be needed
@@ -54,8 +56,8 @@ impl App {
         //config::get_app().unwrap_or(Self::new())
         Self {
             state: State::default(),
-            theme: Theme::Dracula,
-            settings: window::Settings {
+            theme: Theme::TokyoNight,
+            settings: window::Settings { // no icon unfortunately, no support for Wayland
                 decorations: true,
                 ..Default::default()
             }
@@ -64,9 +66,9 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         let state = &mut self.state;
-
         match message {
             Message::Operation(operation) => trace::operation_message(state, operation),
+            Message::Layout(layout) => layout_message(state, layout),
             Message::Pane(pane) => pane_message(state, pane),
             _ => ()
         };

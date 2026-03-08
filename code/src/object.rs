@@ -113,3 +113,6 @@ pub fn read_file(file: &Path) -> Vec<u8> { // TODOMAYBE create mmap instead
     fs::read(file).unwrap()
 }
 
+pub fn read_source(file: &Path) -> Result<String, ()> {
+    fs::read_to_string(file).map_err(|_| ())
+}
