@@ -25,6 +25,7 @@ pub struct State {
     pub layout: Layout,
     pub internal: Internal,
     pub status: Option<nix::sys::wait::WaitStatus>,
+    pub info: Info
     // add more as needed
 }
 
@@ -33,6 +34,17 @@ pub struct Internal {
     pub stopped: bool,
     pub selected_signal: Option<nix::sys::signal::Signal>,
     pub file: Option<crate::dwarf::SourceIndex>,
+}
+
+#[derive(Default)]
+pub enum Info {
+    #[default]
+    NoFileSelected,
+    NotRunning,
+    Stopped,
+    SourceStopped,
+    BreakStopped,
+    Exited(i32),
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +60,7 @@ pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
     .theme(App::theme)
     .window(App::default().settings)
-//    .subscription() //probably will be needed
+//    .subscription(App::subscription) //probably will be needed
     .run_with(|| (App::default(), Task::none())) // make a function to select between default config and user modified config
 }
 
@@ -66,15 +78,16 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let mut task = None;
         let state = &mut self.state;
         match message {
-            Message::Operation(operation) => trace::operation_message(state, operation),
+            Message::Operation(operation) => trace::operation_message(state, operation, &mut task),
             Message::Layout(layout) => layout_message(state, layout),
             Message::Pane(pane) => pane_message(state, pane),
             _ => ()
         };
 
-        Task::none()
+        task.unwrap_or(Task::none())
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -92,6 +105,10 @@ impl App {
     fn settings(&self) -> window::Settings {
         self.settings.clone()
     }
+
+//    fn subscription(&self) -> iced::Subscription<Message> {
+//        todo!()
+//    }
 
 }
 

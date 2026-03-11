@@ -7,15 +7,15 @@ use std::collections::HashMap;
 
 
 use nix::sys::ptrace;
-use nix::sys::signal::{self, Signal};
+use nix::sys::signal::{self, Signal,};
 use nix::unistd::Pid;
+use nix::sys::wait;
 
 use nix::libc::user_regs_struct;
 
 use ::object as object_foreign;
 
 use object_foreign::Object;
-use object_foreign::ObjectSymbol;
 
 
 use crate::data::*;
@@ -124,13 +124,16 @@ pub enum Operation {
     SignalSelect(nix::sys::signal::Signal),
     BreakpointAdd(u64),
     BreakpointRemove(u64),
+    HandleSignal(wait::WaitStatus),
+    Reset,
+    ResetFile
     //fill as needed
 }
 
 
 // Inner Tracing Logic
 
-pub fn operation_message(state: &mut window::State, operation: Operation) {
+pub fn operation_message(state: &mut window::State, operation: Operation, task: &mut Option<iced::Task<window::Message>>) {
     match operation {
         Operation::LoadFile => {
             let file = match Dialog::file(None, None) {
@@ -152,7 +155,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation) {
 
             dwarf_set(); // preloading all dwarf related data
             panes_preload(state);
-        }, //FEATURE async?
+        },
         Operation::RunTracee => {
             let pid = match object::run_tracee(FILE.access().as_ref().unwrap(), Vec::new(), None) {
                 Err(_) => return,
@@ -165,26 +168,17 @@ pub fn operation_message(state: &mut window::State, operation: Operation) {
                 Ok(_) => (),
                 Err(()) => return
             };
-            STDIO.none();
-            PID.none();
-            PROC_PATH.none();
-            EXEC_SHIFT.none();
-            MEMORY.none();
-            REGISTERS.none();
+            *task = Some(iced::Task::done(window::Message::Operation(Operation::Reset)));
         },
         Operation::Step => {
             let pid = PID.access().unwrap();
             if step(pid, None).is_err() {return;};
-            state.status = Some(wait(pid).unwrap());
-            REGISTERS.sets(get_registers(pid).unwrap());
         },
         Operation::SourceStep => {
             let pid = PID.access().unwrap();
             if source_step(pid, LINES.access().as_ref().unwrap()).is_err() {
                 return;
             };
-            REGISTERS.sets(get_registers(pid).unwrap());
-
         },
         Operation::Pause => {
             if signal(PID.access().unwrap(), Signal::SIGTRAP).is_err() {
@@ -198,25 +192,49 @@ pub fn operation_message(state: &mut window::State, operation: Operation) {
             if continue_tracee(pid).is_err() {
                 return;
             };
-            state.status = Some(wait(pid).unwrap());
-            BREAKPOINTS.access().as_ref().unwrap().disable_all().unwrap();
-            REGISTERS.sets(get_registers(pid).unwrap());
         },
         Operation::Kill => {
+            if !state.internal.stopped {
+
+            };
             if signal(PID.access().unwrap(), Signal::SIGKILL).is_err() {
                 return;
             };
         },
         Operation::Signal => {
-            if signal(PID.access().unwrap(), state.internal.selected_signal.unwrap()).is_err() {
+            let pid = PID.access().unwrap();
+            if signal(pid, Signal::SIGSTOP).is_err() {
                 return;
             };
+            let _ = wait(pid);
+            //now we can signal the tracee (all ptrace functions (apart from some) can be done only when the tracee is stopped)
+            let _ = signal_tracee(pid, state.internal.selected_signal.unwrap());
         },
         Operation::SignalSelect(signal) => {state.internal.selected_signal = Some(signal)},
         Operation::BreakpointAdd(addr) => BREAKPOINTS.access().as_mut().unwrap().add_future(addr),
         Operation::BreakpointRemove(addr) => {BREAKPOINTS.access().as_mut().unwrap().rem(addr);},
+
+        Operation::HandleSignal(status) => handle(state, status, task),
+        Operation::Reset => {
+            state.internal.stopped = false;
+            reset();
+        },
+        Operation::ResetFile => {
+            state.internal.stopped = false;
+            if PID.access().is_some() {reset();}
+            FILE.none();
+            DWARF.none();
+            EHFRAME.none();
+            BREAKPOINTS.none();
+            SOURCE.none();
+            LINES.none();
+            FUNCTIONS.none();
+            unsafe {
+                DATA = Vec::new()
+            };
+        },
         _ => ()
-    }
+    };
 }
 
 fn dwarf_set() {
@@ -295,7 +313,28 @@ fn tracee_setup(state: &mut window::State, pid: Pid) {
     };
 }
 
+fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option<iced::Task<window::Message>>) {
+    match status {
+        wait::WaitStatus::Exited(_, exit) => {
+            state.info = window::Info::Exited(exit);
+            *task = Some(iced::Task::done(window::Message::Operation(Operation::Reset)));
+            return;
+        },
 
+        _ => return
+    };
+
+
+}
+
+fn reset() {
+    STDIO.none();
+    PID.none();
+    PROC_PATH.none();
+    EXEC_SHIFT.none();
+    MEMORY.none();
+    REGISTERS.none();
+}
 
 // Tracing Interface
 
@@ -551,11 +590,11 @@ fn write_memory(address: u64, buf: &[u8]) -> Result<(), ()> {
     }
 }
 
-pub fn wait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
-    nix::sys::wait::waitpid(pid, None)
+pub fn wait(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> {
+   wait::waitpid(pid, None)
 }
 
-pub fn testwait(pid: Pid) -> Result<nix::sys::wait::WaitStatus, nix::errno::Errno> {
+pub fn testwait(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> {
     nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WNOHANG))
 }
 

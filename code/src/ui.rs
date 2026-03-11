@@ -707,7 +707,7 @@ impl ByteBase {
         match self {
             Self::Hex => format!("{:02x}", num),
             Self::Dec => format!("{}", num),
-            Self::Chr => format!("'{:}'", if num.is_ascii_graphic() {num as char} else {' '}),
+            Self::Chr => format!("' {} '", if num.is_ascii_graphic() {num as char} else {' '}),
         }
     }
 }
@@ -832,11 +832,12 @@ pub enum PaneMessage {
     RegistersChangeFormat(pane_grid::Pane, Base),
     CodeSelectDir(pane_grid::Pane, String),
     CodeSelectFile(pane_grid::Pane, String),
+    CodeToggleUpdate(pane_grid::Pane),
+    CodeScroll(pane_grid::Pane, scrollable::Viewport),
     MemoryChangeFormat(pane_grid::Pane, ByteBase),
     MemoryToggleSize(pane_grid::Pane),
     MemoryInput(pane_grid::Pane, String),
     MemorySubmit(pane_grid::Pane),
-    MemoryUpdate(pane_grid::Pane),
     MemoryPaste(pane_grid::Pane, String),
     MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), //the i8 is as a signed multiplier, mirroring the axis
     MemoryReset(pane_grid::Pane)
@@ -988,6 +989,14 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
         }
     }
 
+    let size = 30;
+
+    let update_button = svg_button(
+        "icons/view.svg",
+        size,
+        Some(if pane.update {style::widget_svg_toggled} else {style::widget_svg}))
+    .style(if pane.update {style::widget_button_toggled} else {style::widget_button})
+    .on_press(Message::Pane(PaneMessage::CodeToggleUpdate(id)));
 
     let bind = SOURCE.access();
     if bind.is_none() {
@@ -1000,13 +1009,13 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
     dirs.sort();
 
-    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path))).placeholder("Dir...");
+    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
 
     let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap())].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
 
     files.sort();
 
-    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path))).placeholder("File...");
+    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
 
     let comp_path = PathBuf::from(pane.dir.clone().unwrap());
     let file_path = PathBuf::from(pane.file.clone().unwrap());
@@ -1021,7 +1030,7 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
         let addresses: Vec<Option<u64>> = numbers.iter().map(|num| {
             let source_index = SourceIndex {
-                line: *num,
+                line: *num+1,
                 hash_path: comp_path.clone(),
                 index
             };
@@ -1035,7 +1044,7 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
         let line_number: iced::widget::Column<'_, Message> = column(
             numbers.iter().map(|num| 
-               text(num).size(size-8).height(size).center().into()
+               text(num+1).size(size-8).height(size).center().into()
             )
         ).width(Length::Shrink).align_x(iced::Right);
 
@@ -1047,20 +1056,28 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
         container(
             row![
-                breakpoints, line_number, text
-            ].spacing(5)
+                breakpoints, line_number, container("").width(5), text
+            ].spacing(0)
             .padding(5)
-        ).style(style::back)
+        )
     } else {
         program_message("File contents not loaded.")
     };
 
+    let text = scrollable(
+        code
+    ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view)));
+
+
     container(
         column![
-            row![hash_list, file_list].spacing(10),
-            code
+            row![hash_list, file_list, widget_fill(), update_button].spacing(10).height(size),
+            text
         ]
-    )
+    ).style(style::back)
 }
 
 fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, Message> {
@@ -1090,19 +1107,19 @@ fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, 
         .style(style::widget_button)
     };
 
-    let step = svg_button("icons/step.svg", size, Some(if stopped {style::bar_svg} else {style::button_svg_disabled}))
+    let step = svg_button("icons/step.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
     .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
     .style(style::widget_button);
 
-    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped {style::bar_svg} else {style::button_svg_disabled}))
+    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
     .on_press_maybe(if stopped {Some(Message::Operation(Operation::SourceStep))} else {None})
     .style(style::widget_button);
 
-    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::bar_svg} else {style::button_svg_disabled}))
+    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
     .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
     .style(style::widget_button);
 
-    let signal = svg_button("icons/signal.svg", size, Some(if run & state.internal.selected_signal.is_some() {style::bar_svg} else {style::button_svg_disabled}))
+    let signal = svg_button("icons/signal.svg", size, Some(if run & state.internal.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
     .on_press_maybe(if run & state.internal.selected_signal.is_some() {Some(Message::Operation(Operation::Signal))} else {None})
     .style(style::widget_button);
 
@@ -1452,13 +1469,14 @@ fn pane_view_info<'a>(pane_grid: &PaneInfo) -> Container<'a, Message> {
 }
 
 
+//PaneMessage Handle (Mainframe Operations)
 
-
-//message Handle
+fn get_pane<'a>(panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane) -> &'a mut Pane {
+    panes.get_mut(pane).unwrap()
+}
 
 pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
     let panes = &mut state.layout.panes;
-    let get_pane = |panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane| panes.get_mut(pane).unwrap();
 
     match message {
         PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
@@ -1485,6 +1503,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
                 source.get_mut(&comp_dir).unwrap().get_mut(index).unwrap().content = Some(file);
             };
         },
+        PaneMessage::CodeToggleUpdate(pane) => get_pane(panes, pane).code().update ^= true,
         PaneMessage::MemoryChangeFormat(pane, base) => get_pane(panes, pane).memory().format = base,
         PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
         PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
@@ -1569,7 +1588,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
     };
 }
 
-pub fn update_memory(pane: &mut PaneMemory) {
+pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
     let current = pane.address;
     let limit = pane.read_address;
 
@@ -1609,6 +1628,8 @@ pub fn update_memory(pane: &mut PaneMemory) {
     pane.data = data.unwrap();
 }
 
+
+// Layout Logic
 
 pub fn layout_message(state: &mut State, message: LayoutMessage) {
     match message {

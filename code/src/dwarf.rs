@@ -279,7 +279,9 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
 }
 
 pub fn get_main_file() -> (String, String) {
-    find_main();
+    if EHFRAME.access().as_ref().unwrap().main.is_none() { // if no main, then find it from the symbols
+        find_main();
+    };
     let mut ehframe_bind = EHFRAME.access();
     let ehframe = ehframe_bind.as_mut().unwrap();
     let symbol = ehframe.object.symbol_by_name("main").unwrap();
@@ -429,6 +431,12 @@ pub fn parse_functions(dwarf: Dwarf) {
             };
 
             if entry.tag() != gimli::DW_TAG_subprogram {continue;}
+
+            if entry.has_attr(gimli::DW_AT_main_subprogram) { // FINDING MAIN
+                let main = entry.offset().to_debug_info_offset(&unit_header);
+                EHFRAME.access().as_mut().unwrap().main = main;
+            };
+
             if entry.attr(gimli::DW_AT_declaration).is_some() {
                 declarations.insert(entry.offset.to_debug_info_offset(&unit).unwrap(), parent_stack.last().unwrap_or(&""));
                 continue;
@@ -477,7 +485,7 @@ pub fn parse_functions(dwarf: Dwarf) {
     FUNCTIONS.sets(function_index);
 }
 
-pub fn find_main() { // this means that you cannot debug such program that would recurse the main function or call it more than once, but most people dont do that, and the fix is immediate on user's side
+pub fn find_main() { // from the symbol, but only if main isnt already found
     let mut ehframe_bind = EHFRAME.access();
     let ehframe = ehframe_bind.as_mut().unwrap();
     let symbol = ehframe.object.symbol_by_name("main").unwrap();

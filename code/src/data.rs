@@ -69,17 +69,3 @@ impl <T>ImplGlobal<T> for Global<T> {
         *self.access() = None;
     }
 }
-
-
-
-
-// SAVE FOR LATER
-fn hi() {
-    unsafe {
-        DATA = vec![0,1,2]
-    }
-    #[allow(static_mut_refs)]
-    let a = unsafe {
-        &DATA
-    };
-}
