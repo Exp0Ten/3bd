@@ -782,13 +782,29 @@ pub struct PaneMemory {
 #[derive(Debug, Clone, Default)]
 struct PaneStack {} // TODO
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PaneCode {
     pub update: bool,
     pub dir: Option<String>,
     pub file: Option<String>,
-    pub breakpoints: Vec<Option<u64>>
+    pub breakpoints: Vec<Option<u64>>,
+    pub scrollable: scrollable::Id,
+    pub viewport: Option<scrollable::Viewport>
 }
+
+impl Default for PaneCode {
+    fn default() -> Self {
+        Self {
+            update: true,
+            dir: None,
+            file: None,
+            breakpoints: Vec::new(),
+            scrollable: scrollable::Id::unique(),
+            viewport: None
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Default)]
 struct PaneAssembly {} // TODO
@@ -1062,15 +1078,16 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
     dirs.sort();
 
-    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs, pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
+    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs.clone(), pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
 
-    let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap())].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
+    let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap_or(dirs[0].clone()))].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
 
     files.sort();
 
     let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
 
-    let code = match &pane.file {
+
+    let code = if pane.dir.is_some() {match &pane.file {
         Some(file) => {
             let comp_path = PathBuf::from(pane.dir.as_ref().unwrap());
             let file_path = PathBuf::from(file);
@@ -1081,17 +1098,20 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
                 ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
                 .height(Length::Fill)
                 .width(Length::Fill)
+                .id(pane.scrollable.clone())
                 .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view))))
             } else {
                 program_message("File contents not loaded.")
             }
         },
         None => program_message("File not selected.").into()
+    }} else {
+        program_message("Directory not selected.").into()
     };
 
     container(
         column![
-            row![hash_list, file_list, widget_fill(), update_button].spacing(10).height(size),
+            row![hash_list, file_list, widget_fill(), update_button].spacing(10).padding(3).height(size+6),
             code
         ]
     ).style(style::back)
@@ -1120,7 +1140,10 @@ fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, p
         }
     }
 
-    let (file, index) = source.get_file(comp_path.clone(), file_path).unwrap();
+    let (file, index) = match source.get_file(comp_path.clone(), file_path) {
+        Some(file) => file,
+        None => return Err(())
+    };
 
     if file.content.is_none() {
         return Err(())
@@ -1164,6 +1187,58 @@ fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, p
     .padding(5))
 }
 
+pub fn code_panes_update(state: &mut State, task: &mut Option<Task<Message>>) {
+    let file = match &state.internal.file {
+        Some(file) => file,
+        None => return
+    };
+    let mut tasks = Vec::new();
+    let panes = &mut state.layout.panes;
+    for (id, pane) in panes.iter_mut() {
+        let data = match pane {
+            Pane::Code(inner) => inner,
+            _ => continue
+        };
+        if !data.update {
+            continue;
+        }
+        tasks.push(code_update(*id, file, data));
+    }
+    *task = Some(Task::batch(tasks));
+}
+
+fn code_update(id: pane_grid::Pane, file: &SourceIndex, pane: &mut PaneCode) -> Task<Message> {
+    let size = 25;
+    let new_dir = Some(file.hash_path.to_str().unwrap().to_string());
+    let file_name = SOURCE.access().as_ref().unwrap().index_with_line(file).path.clone().to_str().unwrap().to_string();
+
+    let offset = ((file.line as i32 - 3) * size).max(0);
+    let scroll = scrollable::AbsoluteOffset {x: 0., y: offset as f32};
+
+
+    if new_dir == pane.dir && Some(file_name.clone()) == pane.file {
+        let view = match pane.viewport {
+            Some(view) => view,
+            None => return scrollable::scroll_to(pane.scrollable.clone(), scroll)
+        };
+        let start = view.absolute_offset().y;
+        let end = (view.bounds().height - 6.*size as f32).max(0.);
+        let range = start..start+end;
+
+        if range.contains(&(offset as f32)) {
+            return Task::none();
+        };
+        if offset as f32 > range.end {
+            let scroll = scrollable::AbsoluteOffset { x: 0., y: offset as f32 - end};
+            scrollable::scroll_to(pane.scrollable.clone(), scroll)
+        } else {
+            scrollable::scroll_to(pane.scrollable.clone(), scroll)
+        }
+    } else {
+        pane.dir = new_dir;
+        Task::done(Message::Pane(PaneMessage::CodeSelectFile(id, file_name))).chain(scrollable::scroll_to(pane.scrollable.clone(), scroll))
+    }
+}
 
 fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 30;
@@ -1560,7 +1635,7 @@ fn get_pane<'a>(panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane) ->
     panes.get_mut(pane).unwrap()
 }
 
-pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
+pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut Option<Task<Message>>) {
     let panes = &mut state.layout.panes;
 
     match message {
@@ -1568,18 +1643,28 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
         PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
         PaneMessage::CodeSelectDir(pane, dir) => {
             let data = get_pane(panes, pane).code();
+            data.viewport = None;
             data.dir = Some(dir);
             data.file = None;
         },
         PaneMessage::CodeSelectFile(pane, file) => {
             let data = get_pane(panes, pane).code();
             data.file = Some(file.clone()); //file select
+            data.viewport = None;
 
-            let comp_dir = PathBuf::from(data.dir.clone().unwrap());
+            let comp_dir = PathBuf::from(match data.dir.clone() {
+                Some(dir) => dir,
+                None => return
+            });
             let file_path = PathBuf::from(file);
             let bind = SOURCE.access();
             let source = bind.as_ref().unwrap();
-            let code = source.get_file(comp_dir.clone(), file_path.clone()).unwrap();
+            let code = match source.get_file(comp_dir.clone(), file_path.clone()) {
+                Some(file) => file,
+                None => {
+                    return;
+                }
+            };
             if code.0.content.is_some() { //Conditional file load
                 create_breakpoints(comp_dir, code.1, data, code.0.content.as_ref().unwrap().lines().count());
                 return;
@@ -1595,7 +1680,14 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
                 create_breakpoints(comp_dir, index, data, file.lines().count());
             };
         },
-        PaneMessage::CodeToggleUpdate(pane) => get_pane(panes, pane).code().update ^= true,
+        PaneMessage::CodeToggleUpdate(pane) => {
+            let data = get_pane(panes, pane).code();
+            data.update ^= true;
+            if data.update && state.internal.file.is_some() {
+            *task = Some(code_update(pane, state.internal.file.as_ref().unwrap(), data));
+            }
+        },
+        PaneMessage::CodeScroll(pane, view) => get_pane(panes, pane).code().viewport = Some(view),
         PaneMessage::MemoryChangeFormat(pane, base) => get_pane(panes, pane).memory().format = base,
         PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
         PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
@@ -1699,7 +1791,6 @@ fn create_breakpoints(comp_path: PathBuf, index: usize, pane: &mut PaneCode, len
 
     pane.breakpoints = buf;
 }
-
 
 pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
     let current = pane.address;

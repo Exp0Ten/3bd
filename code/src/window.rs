@@ -74,7 +74,7 @@ impl App {
         match message {
             Message::Operation(operation) => trace::operation_message(state, operation, &mut task),
             Message::Layout(layout) => layout_message(state, layout),
-            Message::Pane(pane) => pane_message(state, pane),
+            Message::Pane(pane) => pane_message(state, pane, &mut task),
             _ => ()
         };
 

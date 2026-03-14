@@ -447,6 +447,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         },
         None => BREAKPOINTS.access().as_mut().unwrap().disable_all()
     };
+    ui::code_panes_update(state, task);
 }
 
 fn reset() {

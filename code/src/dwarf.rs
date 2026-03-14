@@ -292,16 +292,12 @@ pub fn get_main_file() -> (String, String) {
     let index = lines_bind.as_ref().unwrap().get_line(address).unwrap();
 
     let comp_dir = index.hash_path.clone();
-    let mut source_bind = SOURCE.access();
+    let source_bind = SOURCE.access();
     let file = source_bind.as_ref().unwrap().index_with_line(index).clone();
     let file_path = file.path;
 
     let mut path = comp_dir.clone();
     path.push(file_path.clone());
-
-    //if let Ok(text) = crate::object::read_source(&path) {
-    //    source_bind.as_mut().unwrap().get_mut(&comp_dir).unwrap().get_mut(index.index).unwrap().content = Some(text);
-    //};
 
     (String::from(comp_dir.to_str().unwrap()), String::from(file_path.to_str().unwrap()))
 }
