@@ -16,7 +16,7 @@ use crate::{
 pub struct App {
     pub state: State,
     pub theme: Theme,
-    pub settings: window::Settings,      //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
+    pub settings: window::Settings, //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
     // add more as needed
 }
 
@@ -25,26 +25,17 @@ pub struct State {
     pub layout: Layout,
     pub internal: Internal,
     pub status: Option<nix::sys::wait::WaitStatus>,
-    pub info: Info
-    // add more as needed
+    pub last_signal: Option<nix::sys::signal::Signal>,
 }
 
 #[derive(Debug, Default)]
 pub struct Internal {
+    pub no_debug: bool,
     pub stopped: bool,
-    pub selected_signal: Option<nix::sys::signal::Signal>,
     pub file: Option<crate::dwarf::SourceIndex>,
-}
-
-#[derive(Default)]
-pub enum Info {
-    #[default]
-    NoFileSelected,
-    NotRunning,
-    Stopped,
-    SourceStopped,
-    BreakStopped,
-    Exited(i32),
+    pub breakpoint: bool,
+    pub manual: bool,
+    pub source_step: Option<trace::Breakpoints>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +133,15 @@ impl Dialog {
         .set_title(format!("Three Body Debugger - {}", title.unwrap_or("Warning")))
         .set_description(msg)
         .show();
+    }
+
+    pub fn warning_choice(msg: &str, title: Option<&str>) -> rfd::MessageDialogResult {
+        rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .set_title(format!("Three Body Debugger - {}", title.unwrap_or("Warning")))
+        .set_description(msg)
+        .show()
     }
 
     pub fn file(dir: Option<std::path::PathBuf>, file: Option<String>) -> Option<std::path::PathBuf> {

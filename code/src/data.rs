@@ -29,6 +29,7 @@ pub static FILE: Global<std::path::PathBuf> = empty();
 pub static STDIO: Global<(PipeWriter, PipeReader)> = empty();
 pub static PID: Global<Pid> = empty();
 pub static PROC_PATH: Global<path::PathBuf> = empty();
+pub static MAPS: Global<Vec<trace::MemoryMap>> = empty();
 pub static EXEC_SHIFT: Global<u64> = empty();
 pub static MEMORY: Global<fs::File> = empty();
 pub static DWARF: Global<dwarf::DwarfSections> = empty();

@@ -191,6 +191,9 @@ pub fn address(theme: &Theme, status: text_input::Status, incorrect: bool) -> te
     default
 }
 
+pub fn line(theme: &Theme) -> text::Style {
+    text::Style { color: Some(theme.extended_palette().primary.base.color) }
+}
 fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color {
     Color {
         r: color_b.r * factor + color_a.r * (1.-factor),

@@ -5,7 +5,7 @@
     It handles the runtime, window, and debugging routine
 */
 
-mod test;       // for testing and debbuging
+// mod test;       // for testing and debbuging
 
 // the following files go in sequence based on what they depend on (tracing need objdump, data needs trace, ui needs data ...)
 mod object;     // file handling, reading, preparing (+ from dwarf, import source files)

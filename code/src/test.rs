@@ -64,7 +64,7 @@ fn second() {
         &DATA
     };
 
-    let (dwarf, object) = load_dwarf(data);
+    let (dwarf, object) = load_dwarf(data).unwrap();
     DWARF.sets(dwarf);
     ENDIAN.sets(match object.endianness() {
         object::Endianness::Little => Endian::Little,

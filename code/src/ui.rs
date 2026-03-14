@@ -16,7 +16,8 @@ use crate::{
     window::*, data::*, trace::*, style, config, dwarf::*, object
 };
 
-const BOLD: font::Font = font::Font {weight: font::Weight::ExtraBold, ..font::Font::DEFAULT};
+const EXTRABOLD: font::Font = font::Font {weight: font::Weight::ExtraBold, ..font::Font::DEFAULT};
+const BOLD: font::Font = font::Font {weight: font::Weight::Bold, ..font::Font::DEFAULT};
 
 pub struct Layout {
     status_bar: bool,
@@ -359,7 +360,7 @@ impl Layout {
                 config::Pane::code => Pane::Code(PaneCode::default()),
                 config::Pane::registers => Pane::Registers(PaneRegisters::default()),
                 config::Pane::stack => Pane::Stack(PaneStack::default()),
-                config::Pane::info => Pane::Info(PaneInfo::default()),
+                config::Pane::info => Pane::Info,
                 config::Pane::control => Pane::Control(PaneControl::default()),
                 config::Pane::terminal => Pane::Terminal(PaneTerminal::default())
             }
@@ -375,10 +376,6 @@ impl Layout {
             }
         }
     }
-
-//    fn empty() -> Box<pane_grid::Configuration<Pane>> {
-//        Box::new(pane_grid::Configuration::Pane(Pane::Empty))
-//    }
 
     fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE
         if self.panel { match self.panel_mode {
@@ -719,7 +716,7 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     Code(PaneCode),
     Assembly(PaneAssembly),
     Registers(PaneRegisters),
-    Info(PaneInfo), // ELF dump
+    Info, // ELF dump
     Control(PaneControl),
     Terminal(PaneTerminal),
     _Empty //just in case
@@ -747,12 +744,6 @@ impl Pane {
     fn control(&mut self) -> &mut PaneControl {
         match self {
             Pane::Control(inner) => inner,
-            _ => panic!()
-        }
-    }
-    fn info(&mut self) -> &mut PaneInfo {
-        match self {
-            Pane::Info(inner) => inner,
             _ => panic!()
         }
     }
@@ -795,7 +786,8 @@ struct PaneStack {} // TODO
 pub struct PaneCode {
     pub update: bool,
     pub dir: Option<String>,
-    pub file: Option<String>
+    pub file: Option<String>,
+    pub breakpoints: Vec<Option<u64>>
 }
 
 #[derive(Debug, Clone, Default)]
@@ -807,10 +799,9 @@ struct PaneRegisters {
 }
 
 #[derive(Debug, Clone, Default)]
-struct PaneInfo {} // TODO
-
-#[derive(Debug, Clone, Default)]
-struct PaneControl {} // TODO
+struct PaneControl {
+    selected_signal: Option<Signal>,
+}
 
 #[derive(Debug, Clone, Default)]
 struct PaneTerminal {
@@ -829,6 +820,7 @@ pub enum LayoutMessage {
 
 #[derive(Debug, Clone)]
 pub enum PaneMessage {
+    ControlSelectSignal(pane_grid::Pane, Signal),
     RegistersChangeFormat(pane_grid::Pane, Base),
     CodeSelectDir(pane_grid::Pane, String),
     CodeSelectFile(pane_grid::Pane, String),
@@ -909,14 +901,89 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
     .style(style::bar)
 }
 
-fn statusbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
-    container(row![
-        text("Program State | Program Position | Backtrace ...").size((height-7) as f32)
-    ]).height(Length::Fixed(height as f32))
+fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
+    fn status_text<'a>(string: String, mut content: Row<'a, Message>, size: u16, style: Option<impl Fn(&Theme) -> text::Style + 'a>) -> Row<'a, Message> {
+        content = if style.is_some() {
+            content.push(
+                text(string).size(size).style(style.unwrap())
+            )
+        } else {
+            content.push(
+                text(string).size(size)
+            )
+        };
+        content
+    }
+
+    let default: Option<fn(&Theme) -> text::Style> = None;
+
+    let size = height - 7;
+    let mut content: Row<'_, Message> = row![];
+
+    content = match FILE.access().as_ref() {
+        None => status_text("File not loaded.".to_string(), content, size, default),
+        Some(file) => status_text(format!("File: {}", file.file_name().unwrap().to_str().unwrap()), content, size, Some(style::widget_text)),
+    };
+    content = content.push(delimiter(10));
+
+    content = match PID.access().as_ref() {
+        None => status_text("Program not running".to_string(), content, size, default),
+        Some(pid) => status_text(format!("Pid: {}", pid), content, size, Some(style::widget_text)),
+    };
+
+    if PID.access().is_some() {
+        content = content.push(delimiter(10));
+
+        if state.internal.stopped {
+            let mut msg = match state.status.unwrap() {
+                nix::sys::wait::WaitStatus::Signaled(_, signal, core_dump) => format!("Stopped: {signal}"),
+                _ => "Stopped".to_string()
+            };
+
+            if state.internal.breakpoint {
+                msg = "Breakpoint".to_string()
+            }
+
+            if state.internal.manual {
+                msg = "Stopped".to_string()
+            }
+            content = status_text(msg, content, size, default);
+
+            match &state.internal.file {
+                Some(index) => {
+                    let bind = SOURCE.access();
+                    let source = bind.as_ref().unwrap();
+                    let file = source.index_with_line(index).path.to_str().unwrap();
+                    let msg = format!("At line: {} in file {}", index.line, file);
+
+                    content = content.push(widget_fill());
+                    content = status_text(msg, content, size, default);
+                }
+                None => ()
+            };
+        } else {
+            content = status_text("Running...".to_string(), content, size, default);
+        };
+    }
+
+    match state.status {
+        Some(nix::sys::wait::WaitStatus::Exited(pid, ecode)) => {
+            content = content.push(delimiter(10));
+            let msg = format!("Program with pid {pid} exited: {ecode:-}");
+            content = status_text(msg, content, size, Some(style::error));
+        },
+        _ => ()
+    };
+
+    container(
+        content
+    ).height(Length::Fixed(height as f32))
     .width(Length::Fill)
     .padding(3)
     .style(style::bar)
 }
+
+
 
 fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
     container(
@@ -935,13 +1002,13 @@ fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
 fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
     let (content, titlebar) = match pane {
         Pane::Code(pane) => (pane_view_code(pane, state, id), pane_titlebar("Code", "icons/pane_source.svg")),
-        Pane::Control(pane) => (pane_view_control(pane, state), pane_titlebar("Control", "icons/pane_control.svg")),
+        Pane::Control(pane) => (pane_view_control(pane, state, id), pane_titlebar("Control", "icons/pane_control.svg")),
         Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
         Pane::Stack(pane) => (pane_view_stack(pane), pane_titlebar("CallStack", "icons/pane_stack.svg")),
         Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
         Pane::Assembly(pane) => (pane_view_assembly(pane), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
         Pane::Terminal(pane) => (pane_view_terminal(pane), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
-        Pane::Info(pane) => (pane_view_info(pane), pane_titlebar("ELF Info", "icons/pane_info.svg")),
+        Pane::Info => (pane_view_info(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
 
         _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
     };
@@ -966,27 +1033,10 @@ fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, M
     ).style(style::pane_title)
 }
 
+
 fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    fn breakpoint_button<'a>(address: Option<u64>) -> button::Button<'a, Message> {
-        match address {
-            Some(address) => {
-                let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
-                button(
-                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
-                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
-                .width(Length::Fill)
-                .height(Length::Fill)
-                ).style(style::breakpoint)
-                .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
-                .width(25)
-                .height(25)
-                .padding(7)
-            },
-            None => button("")
-                .style(style::breakpoint)
-                .width(25)
-                .height(25)
-        }
+    if state.internal.no_debug {
+        return program_message("No debugging informatio")
     }
 
     let size = 30;
@@ -1000,6 +1050,9 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
     let bind = SOURCE.access();
     if bind.is_none() {
+        if state.internal.no_debug {
+            return program_message("No debugging information present in the file.");
+        }
         return program_message("Load the program to display source code.");
     };
 
@@ -1017,70 +1070,102 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
     let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
 
-    let comp_path = PathBuf::from(pane.dir.clone().unwrap());
-    let file_path = PathBuf::from(pane.file.clone().unwrap());
-
-    let (file, index) = source.get_file(comp_path.clone(), file_path).unwrap();
-
-    let code = if let Some(content) = &file.content {
-        let lines: Vec<&str> = content.lines().collect();
-        let numbers: Vec<u64> = (0..lines.len()).map(|num| num as u64).collect();
-
-        let size = 25;
-
-        let addresses: Vec<Option<u64>> = numbers.iter().map(|num| {
-            let source_index = SourceIndex {
-                line: *num+1,
-                hash_path: comp_path.clone(),
-                index
-            };
-            let address = LINES.access().as_ref().unwrap().get_address(&source_index);
-            address
-        }).collect();
-
-        let breakpoints: iced::widget::Column<'_, Message> = column(addresses.iter().map(|address|
-            breakpoint_button(*address).into()
-        ));
-
-        let line_number: iced::widget::Column<'_, Message> = column(
-            numbers.iter().map(|num| 
-               text(num+1).size(size-8).height(size).center().into()
-            )
-        ).width(Length::Shrink).align_x(iced::Right);
-
-        let text: iced::widget::Column<'_, Message> = column(
-            lines.iter().map(|line|
-                text(String::from(*line)).wrapping(text::Wrapping::None).size(size-8).height(size).center().into()
-            )
-        );
-
-        container(
-            row![
-                breakpoints, line_number, container("").width(5), text
-            ].spacing(0)
-            .padding(5)
-        )
-    } else {
-        program_message("File contents not loaded.")
+    let code = match &pane.file {
+        Some(file) => {
+            let comp_path = PathBuf::from(pane.dir.as_ref().unwrap());
+            let file_path = PathBuf::from(file);
+            let code = code_display(comp_path, file_path, source, pane, &state.internal.file);
+            if code.is_ok() {
+                container(scrollable(
+                code.unwrap()
+                ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view))))
+            } else {
+                program_message("File contents not loaded.")
+            }
+        },
+        None => program_message("File not selected.").into()
     };
-
-    let text = scrollable(
-        code
-    ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
-    .height(Length::Fill)
-    .width(Length::Fill)
-    .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view)));
-
 
     container(
         column![
             row![hash_list, file_list, widget_fill(), update_button].spacing(10).height(size),
-            text
+            code
         ]
     ).style(style::back)
 }
 
-fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, Message> {
+fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, pane: &'a PaneCode, line: &Option<SourceIndex>) -> Result<Row<'a, Message>, ()> {
+    fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
+        match address {
+            Some(address) => {
+                let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
+                button(
+                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
+                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                .width(Length::Fill)
+                .height(Length::Fill)
+                ).style(style::breakpoint)
+                .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
+                .width(size)
+                .height(size)
+                .padding(7)
+            },
+            None => button("")
+                .style(style::breakpoint)
+                .width(size)
+                .height(size)
+        }
+    }
+
+    let (file, index) = source.get_file(comp_path.clone(), file_path).unwrap();
+
+    if file.content.is_none() {
+        return Err(())
+    }
+
+    let size = 25;
+
+    let mut lines = Vec::new();
+
+    let breakpoints = column(
+        pane.breakpoints.iter().enumerate().map(|(index, address)| {
+            lines.push(index);
+            breakpoint_button(*address, size).into()
+        })
+    );
+
+    let highlight = match line {
+        Some(source) => if source.hash_path == comp_path && source.index == index {
+            source.line
+        } else {
+            0
+        },
+        None => 0
+    };
+
+    let line_number = column(
+        lines.iter().map(|num|
+            text(num+1).size(size-8).height(size).center()
+            .style(if highlight == (num + 1) as u64 {style::line} else {|_: &Theme| text::Style::default()})
+            .font(if highlight == (num + 1) as u64 {BOLD} else {font::Font::DEFAULT}).into()
+        )
+    ).width(Length::Shrink).align_x(iced::Right);
+
+    let text = text(file.content.clone().unwrap()).size(size-8)
+    .line_height(text::LineHeight::Absolute(iced::Pixels(size as f32)))
+    .wrapping(text::Wrapping::None);
+
+    Ok(row![
+        breakpoints, line_number, container("").width(5), text
+    ].spacing(0)
+    .padding(5))
+}
+
+
+fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 30;
 
     let file = FILE.access().is_some();
@@ -1111,16 +1196,16 @@ fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, 
     .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
     .style(style::widget_button);
 
-    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if stopped {Some(Message::Operation(Operation::SourceStep))} else {None})
+    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped & !state.internal.no_debug {style::widget_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if stopped & !state.internal.no_debug {Some(Message::Operation(Operation::SourceStep))} else {None})
     .style(style::widget_button);
 
-    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
+    let kill = svg_button("icons/signal_kill.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if stopped {Some(Message::Operation(Operation::Kill))} else {None})
     .style(style::widget_button);
 
-    let signal = svg_button("icons/signal.svg", size, Some(if run & state.internal.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if run & state.internal.selected_signal.is_some() {Some(Message::Operation(Operation::Signal))} else {None})
+    let signal = svg_button("icons/signal.svg", size, Some(if stopped & pane.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if stopped & pane.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(pane.selected_signal.unwrap())))} else {None})
     .style(style::widget_button);
 
     let signals = [
@@ -1141,7 +1226,7 @@ fn pane_view_control<'a>(pane: &PaneControl, state: &'a State) -> Container<'a, 
         Signal::SIGTSTP,
     ];
 
-    let select = pick_list(signals, state.internal.selected_signal, |signal| Message::Operation(Operation::SignalSelect(signal)))
+    let select = pick_list(signals, pane.selected_signal, move |signal| Message::Pane(PaneMessage::ControlSelectSignal(id, signal)))
     .placeholder("Signal...");
 
     let content = container(row![
@@ -1164,7 +1249,7 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
     let size = 30;
 
     let button_hex: button::Button<'_, Message> = button(
-        text("0x").center().font(BOLD).size(size - 12)
+        text("0x").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == ByteBase::Hex {style::widget_text_toggled} else {style::widget_text})
     ).padding(0)
     .height(size)
@@ -1173,7 +1258,7 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
     .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Hex)));
 
     let button_dec: button::Button<'_, Message> = button(
-        text("10").center().font(BOLD).size(size - 12)
+        text("10").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == ByteBase::Dec {style::widget_text_toggled} else {style::widget_text})
     ).padding(0)
     .height(size)
@@ -1182,7 +1267,7 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
     .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Dec)));
 
     let button_chr: button::Button<'_, Message> = button(
-        text("A").center().font(BOLD).size(size - 12)
+        text("A").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == ByteBase::Chr {style::widget_text_toggled} else {style::widget_text})
     ).padding(0)
     .height(size)
@@ -1336,7 +1421,7 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
     let size = 30;
 
     let button_hex: button::Button<'_, Message> = button(
-        text("0x").center().font(BOLD).size(size - 12)
+        text("0x").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == Base::Hex {style::widget_text_toggled} else {style::widget_text})
     ).padding(0)
     .height(size)
@@ -1345,7 +1430,7 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
     .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Hex)));
 
     let button_dec: button::Button<'_, Message> = button(
-        text("10").center().font(BOLD).size(size - 12)
+        text("10").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == Base::Dec {style::widget_text_toggled} else {style::widget_text})
     ).padding(4)
     .height(size)
@@ -1354,7 +1439,7 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
     .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Dec)));
 
     let button_oct: button::Button<'_, Message> = button(
-        text("0o").center().font(BOLD).size(size - 12)
+        text("0o").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == Base::Oct {style::widget_text_toggled} else {style::widget_text})
     ).padding(4)
     .height(size)
@@ -1363,7 +1448,7 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
     .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Oct)));
 
     let button_bin: button::Button<'_, Message> = button(
-        text("0b").center().font(BOLD).size(size - 12)
+        text("0b").center().font(EXTRABOLD).size(size - 12)
         .style(if pane.format == Base::Bin {style::widget_text_toggled} else {style::widget_text})
     ).padding(4)
     .height(size)
@@ -1463,7 +1548,7 @@ fn pane_view_terminal<'a>(pane: &PaneTerminal) -> Container<'a, Message> {
     content
 }
 
-fn pane_view_info<'a>(pane_grid: &PaneInfo) -> Container<'a, Message> {
+fn pane_view_info<'a>() -> Container<'a, Message> {
     let content = container(text("INFO"));
     content
 }
@@ -1479,8 +1564,13 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
     let panes = &mut state.layout.panes;
 
     match message {
+        PaneMessage::ControlSelectSignal(pane, signal) => get_pane(panes, pane).control().selected_signal = Some(signal),
         PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
-        PaneMessage::CodeSelectDir(pane, dir) => get_pane(panes, pane).code().dir = Some(dir),
+        PaneMessage::CodeSelectDir(pane, dir) => {
+            let data = get_pane(panes, pane).code();
+            data.dir = Some(dir);
+            data.file = None;
+        },
         PaneMessage::CodeSelectFile(pane, file) => {
             let data = get_pane(panes, pane).code();
             data.file = Some(file.clone()); //file select
@@ -1491,16 +1581,18 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
             let source = bind.as_ref().unwrap();
             let code = source.get_file(comp_dir.clone(), file_path.clone()).unwrap();
             if code.0.content.is_some() { //Conditional file load
+                create_breakpoints(comp_dir, code.1, data, code.0.content.as_ref().unwrap().lines().count());
                 return;
             };
             let index = code.1;
             drop(bind);
             let mut path = comp_dir.clone();
-            path.push(file_path);
+            path.push(&file_path);
             if let Ok(file) = object::read_source(&path) {
                 let mut bind = SOURCE.access();
                 let source = bind.as_mut().unwrap();
-                source.get_mut(&comp_dir).unwrap().get_mut(index).unwrap().content = Some(file);
+                source.get_mut(&comp_dir).unwrap().get_mut(index).unwrap().content = Some(file.clone());
+                create_breakpoints(comp_dir, index, data, file.lines().count());
             };
         },
         PaneMessage::CodeToggleUpdate(pane) => get_pane(panes, pane).code().update ^= true,
@@ -1587,6 +1679,27 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage) {
         _ => ()
     };
 }
+
+fn create_breakpoints(comp_path: PathBuf, index: usize, pane: &mut PaneCode, len: usize) {
+    let bind = LINES.access();
+    let lines = bind.as_ref().unwrap();
+
+    let mut buf: Vec<Option<u64>> = Vec::new();
+
+    let mut line = SourceIndex {
+        line: 0,
+        hash_path: comp_path,
+        index
+    };
+
+    for i in 0..len {
+        line.line = i as u64 + 1;
+        buf.push(lines.get_address(&line));
+    }
+
+    pane.breakpoints = buf;
+}
+
 
 pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
     let current = pane.address;

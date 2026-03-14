@@ -184,12 +184,11 @@ impl SectionsToDwarf for DwarfSections<'_> {
 
 // Reading LINE_DATA
 
-pub fn load_dwarf(binary: &'static Vec<u8>) -> (DwarfSections<'static>, object::File<'static>) {
+pub fn load_dwarf(binary: &'static Vec<u8>) -> Result<(DwarfSections<'static>, object::File<'static>), ()> {
     let object = object::File::parse(&**binary).unwrap();
-    let endian = if object.is_little_endian() {
-        Endian::Little
-    } else {
-        Endian::Big
+
+    if object.section_by_name(".debug_info").is_none() {
+        return Err(());
     };
 
     let load_section = |id: gimli::SectionId| -> Result<Section, Box<dyn std::error::Error>> {
@@ -199,9 +198,9 @@ pub fn load_dwarf(binary: &'static Vec<u8>) -> (DwarfSections<'static>, object::
         })
     };
 
-    let dwarf_sections = gimli::DwarfSections::load(&load_section).expect("loading sections??");
+    let dwarf_sections = gimli::DwarfSections::load(&load_section).map_err(|_| ())?;
 
-    (dwarf_sections, object)
+    Ok((dwarf_sections, object))
 }
 
 type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
@@ -279,13 +278,15 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
 }
 
 pub fn get_main_file() -> (String, String) {
-    if EHFRAME.access().as_ref().unwrap().main.is_none() { // if no main, then find it from the symbols
-        find_main();
+    let found = EHFRAME.access().as_ref().unwrap().main.is_some();
+    let main_function = if found {
+        EHFRAME.access().as_ref().unwrap().main.unwrap()
+    } else {
+        find_main()
     };
-    let mut ehframe_bind = EHFRAME.access();
-    let ehframe = ehframe_bind.as_mut().unwrap();
-    let symbol = ehframe.object.symbol_by_name("main").unwrap();
-    let address = object::ObjectSymbol::address(&symbol);
+
+    let address = FUNCTIONS.access().as_ref().unwrap().get_address(main_function).unwrap();
+
 
     let lines_bind = LINES.access();
     let index = lines_bind.as_ref().unwrap().get_line(address).unwrap();
@@ -298,9 +299,9 @@ pub fn get_main_file() -> (String, String) {
     let mut path = comp_dir.clone();
     path.push(file_path.clone());
 
-    if let Ok(text) = crate::object::read_source(&path) {
-        source_bind.as_mut().unwrap().get_mut(&comp_dir).unwrap().get_mut(index.index).unwrap().content = Some(text);
-    };
+    //if let Ok(text) = crate::object::read_source(&path) {
+    //    source_bind.as_mut().unwrap().get_mut(&comp_dir).unwrap().get_mut(index.index).unwrap().content = Some(text);
+    //};
 
     (String::from(comp_dir.to_str().unwrap()), String::from(file_path.to_str().unwrap()))
 }
@@ -386,6 +387,15 @@ impl FunctionIndex {
         };
         None
     }
+
+    fn get_address(&self, function: DebugInfoOffset) -> Option<u64> {
+        for (address, info_offset) in self.func_hash.clone().into_iter() {
+            if info_offset == function {
+                return Some(address);
+            }
+        };
+        None
+    }
 }
 
 pub fn parse_functions(dwarf: Dwarf) {
@@ -443,7 +453,7 @@ pub fn parse_functions(dwarf: Dwarf) {
             }; // save and skip declarations (no pc for us and such), they will be handled later
 
             let parent: &str = match entry.attr(gimli::DW_AT_specification) {
-                Some(function_declaration) => *declarations.get(&debug_reference(function_declaration.value(), &dwarf, &unit)).unwrap(),
+                Some(function_declaration) => *declarations.get(&debug_reference(function_declaration.value(), &unit)).unwrap(),
                 None => *parent_stack.last().unwrap_or(&"")
             };
 
@@ -485,7 +495,7 @@ pub fn parse_functions(dwarf: Dwarf) {
     FUNCTIONS.sets(function_index);
 }
 
-pub fn find_main() { // from the symbol, but only if main isnt already found
+pub fn find_main() -> DebugInfoOffset { // from the symbol, but only if main isnt already found
     let mut ehframe_bind = EHFRAME.access();
     let ehframe = ehframe_bind.as_mut().unwrap();
     let symbol = ehframe.object.symbol_by_name("main").unwrap();
@@ -494,6 +504,7 @@ pub fn find_main() { // from the symbol, but only if main isnt already found
     let functions = function_bind.as_ref().unwrap();
     let function = functions.direct_address(address);
     ehframe.main = Some(function);
+    function
 }
 
 // STACK UNWINDING
@@ -808,7 +819,7 @@ fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlic
         None => (
             entry.attr(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap(),
             match entry.attr_value(gimli::DW_AT_type) {
-                Some(attr) => Some(debug_reference(attr, dwarf, unit)),
+                Some(attr) => Some(debug_reference(attr, unit)),
                 None => None
             }
         )
@@ -879,7 +890,7 @@ fn extract_variables<'a>(
                 }
             );
 
-            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(),dwarf, unit);
+            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
 
             let location = match entry.attr(gimli::DW_AT_location) {
                 Some(attr) => {
@@ -926,7 +937,7 @@ fn extract_variables<'a>(
                 }
             );
 
-            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(),dwarf, unit);
+            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
 
             let location = match entry.attr(gimli::DW_AT_location) {
                 Some(attr) => {
@@ -1249,7 +1260,7 @@ pub struct Assembly {
 
 fn align_pointer(address: u64, bytes: &[u8]) -> Result<u64, ()> {
     'outer: for offset in 0..BACKSCAN {
-        let mut decoder = Decoder::with_ip(64, &bytes, address + offset, DecoderOptions::NONE);
+        let mut decoder = Decoder::with_ip(64, &bytes[offset as usize..], address + offset, DecoderOptions::NONE);
         let mut instruction = Instruction::default();
         while decoder.can_decode() {
             decoder.decode_out(&mut instruction);
@@ -1262,7 +1273,7 @@ fn align_pointer(address: u64, bytes: &[u8]) -> Result<u64, ()> {
     Err(()) //HOW UNLUCKY WHAT
 }
 
-fn disassemble_code(address: u64) -> Result<Assembly, ()> {
+fn disassemble_code(address: u64) -> Result<Assembly, ()> { // REWRITE
     let pointer = address-(AREA/2) as u64;
     let bytes = trace::read_memory(pointer, AREA)?;
     let valid_pointer = align_pointer(pointer, &bytes)?;
@@ -1351,7 +1362,7 @@ fn encoding(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>) -> gimli::DwAt
     }
 }
 
-fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, dwarf: &Dwarf, unit: &Unit) -> DebugInfoOffset {
+fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &Unit) -> DebugInfoOffset {
     match attr {
         gimli::AttributeValue::DebugInfoRef(value) => value,
         gimli::AttributeValue::UnitRef(value) => value.to_debug_info_offset(unit).unwrap(),

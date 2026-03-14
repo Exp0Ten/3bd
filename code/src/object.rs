@@ -25,7 +25,7 @@ pub fn run_tracee(file: &Path, args: Vec<String>, pipe_stdio: Option<(PipeReader
         ),
         None => (
             Stdio::inherit(),
-            Stdio::inherit()
+            Stdio::inherit(),
         )
     };
 
@@ -57,7 +57,6 @@ fn tracee_program(file: &Path, args: Vec<String>, stdio: (Stdio, Stdio)) -> std:
 
 pub fn test_file(file: &Path) -> Result<(), ()> { // True if it has DWARF, False if it doesnt, Err if invalid file
     let title = Some("Executable Error");
-
 
     if !file.exists() || file.is_dir() {
         Dialog::error("File does not exist.", title);
