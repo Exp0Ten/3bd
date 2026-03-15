@@ -194,7 +194,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 Err(_) => return,
                 Ok(pid) => {PID.sets(Pid::from_raw(pid)); Pid::from_raw(pid)},
             };
-            tracee_setup(state, pid);
+            tracee_setup(state, pid, task);
 
             *task = Some(task_read());
         },
@@ -211,6 +211,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
             *task = Some(task_reset());
         },
+
         Operation::Step => {
             if step(PID.access().unwrap(), state.last_signal).is_err() {return;};
             state_cont(state);
@@ -295,6 +296,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             //now we can signal the tracee (all ptrace functions (apart from some) can be done only when the tracee is stopped)
             let _ = signal_tracee(pid, sig);
         },
+
         Operation::BreakpointAdd(addr) => BREAKPOINTS.access().as_mut().unwrap().add_future(addr),
         Operation::BreakpointRemove(addr) => {BREAKPOINTS.access().as_mut().unwrap().rem(addr);},
 
@@ -303,6 +305,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             rfd::MessageDialogResult::Yes => Some(iced::Task::perform(wait_async(PID.access().unwrap()), |result| window::Message::Operation(Operation::HandleSignal(result)))),
             _ => Some(iced::Task::done(window::Message::Operation(Operation::StopTracee)))
         },
+
         Operation::Reset => {
             state.internal.stopped = false;
             state.internal.source_step = None;
@@ -382,7 +385,7 @@ fn panes_preload(state: &mut window::State, task: &mut Option<iced::Task<window:
     *task = Some(iced::Task::batch(tasks));
 }
 
-fn tracee_setup(state: &mut window::State, pid: Pid) {
+fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Task<window::Message>>) {
     let proc_path = PathBuf::from(format!("/proc/{pid}/"));
     state.status = Some(wait(pid).unwrap());
     let path = get_tracee_path(&proc_path).unwrap();
@@ -419,6 +422,10 @@ fn tracee_setup(state: &mut window::State, pid: Pid) {
             _ => ()
         }
     };
+
+    if ui::check_for_assembly(state) {
+        *task = assembly_update(state, REGISTERS.access().unwrap().rip);
+    }
 }
 
 
@@ -468,11 +475,6 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
     }
     REGISTERS.sets(regs);
 
-    let bind = LINES.access();
-    let file = bind.as_ref().unwrap().get_line(regs.rip);
-    state.internal.file = file.map(|index| index.clone());
-    drop(bind);
-
     MAPS.sets(get_process_maps(PROC_PATH.access().as_ref().unwrap()).unwrap());
 
     state.internal.stopped = true;
@@ -484,7 +486,35 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         },
         None => BREAKPOINTS.access().as_mut().unwrap().disable_all()
     };
-    ui::code_panes_update(state, task);
+
+    let assembly_task = if ui::check_for_assembly(state) { // performance reasons
+        assembly_update(state, regs.rip)
+    } else {
+        None
+    };
+
+    if state.internal.no_debug {
+        *task = assembly_task;
+        return;
+    }
+
+    let bind = LINES.access();
+    let file = bind.as_ref().unwrap().get_line(regs.rip);
+    state.internal.file = file.map(|index| index.clone());
+    drop(bind);
+    let code_task = ui::code_panes_update(state, task);
+    match code_task {
+        Some(mut inner) => {
+            match assembly_task {
+                Some(asm_inner) => inner.push(asm_inner),
+                None => ()
+            };
+            *task = Some(iced::Task::batch(inner))
+        },
+        None => *task = assembly_task
+    }
+
+
 }
 
 fn reset() {
@@ -525,6 +555,37 @@ fn state_cont(state: &mut window::State) {
     state.internal.file = None;
 }
 
+fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<window::Message>> {
+    let mut task = None;
+    let range = match get_map_range(rip) {
+        Some(range) => range,
+        None => return None
+    };
+    let base = (rip - rip%8 - 512).max(range.start);
+    let end = (base + 1024).min(range.end);
+    let size = end - base;
+
+    let bytes = match read_memory(base, size as usize) {
+        Ok(data) => data,
+        Err(()) => return None
+    };
+
+    let (pointer, line) = match align_pointer(base, rip, &bytes) {
+        Ok(value) => value,
+        Err(()) => return None
+    };
+
+    let assembly = match disassemble_code(pointer, &bytes[(pointer - base) as usize..]) {
+        Ok(assembly) => assembly,
+        Err(()) => return None
+    };
+
+    state.internal.assembly = Some(assembly);
+
+    ui::assembly_scroll(state, line, &mut task);
+
+    task
+}
 
 
 // Tracing Interface

@@ -1244,43 +1244,43 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
 
 use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, NasmFormatter};
 
-const AREA: usize = 2048; // how many bytes around the address to parse
-const BACKSCAN: u64 = 64;
-const BYTE_COLUMN: usize = 10;
+const DEPTH: u64 = 64; // iteration limit
 
+#[derive(Debug)]
 pub struct Assembly {
-    pointer: u64,
-    text: String,
-    addresses: Vec<u64>
+    pub text: String,
+    pub bytes: String,
+    pub addresses: Vec<u64>
 }
 
-fn align_pointer(address: u64, bytes: &[u8]) -> Result<u64, ()> {
-    'outer: for offset in 0..BACKSCAN {
-        let mut decoder = Decoder::with_ip(64, &bytes[offset as usize..], address + offset, DecoderOptions::NONE);
+pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize), ()> { // the second one is the line number
+    for offset in 0..DEPTH {
+        let mut decoder = Decoder::with_ip(64, &bytes[offset as usize..], address+offset, DecoderOptions::NONE);
         let mut instruction = Instruction::default();
+        let mut counter = 0;
         while decoder.can_decode() {
             decoder.decode_out(&mut instruction);
             if instruction.is_invalid() {
-                continue 'outer;
+                break;
             }
+            if instruction.ip() == rip {
+                return Ok((address+offset, counter));
+            }
+            counter += 1;
         }
-        return Ok(address + offset);
     };
-    Err(()) //HOW UNLUCKY WHAT
+    Err(()) // WOW HOW
 }
 
-fn disassemble_code(address: u64) -> Result<Assembly, ()> { // REWRITE
-    let pointer = address-(AREA/2) as u64;
-    let bytes = trace::read_memory(pointer, AREA)?;
-    let valid_pointer = align_pointer(pointer, &bytes)?;
-
-    let mut decoder = Decoder::with_ip(64, &bytes, valid_pointer, DecoderOptions::NONE);
+pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> {
+    let mut decoder = Decoder::with_ip(64, bytes, address, DecoderOptions::NONE);
     let mut formatter = NasmFormatter::new();
 
     formatter.options_mut().set_digit_separator("_");
-    formatter.options_mut().set_first_operand_char_index(10);
+    formatter.options_mut().set_first_operand_char_index(4);
 
-    let mut result = String::new();
+    let mut instructions = String::new();
+    let mut instructions_bytes = String::new();
     let mut addresses: Vec<u64> = Vec::new();
 
     let mut output = String::new();
@@ -1289,21 +1289,28 @@ fn disassemble_code(address: u64) -> Result<Assembly, ()> { // REWRITE
     while decoder.can_decode() {
         decoder.decode_out(&mut instruction);
         output.clear();
-        formatter.format(&instruction, &mut output);
 
+        formatter.format(&instruction, &mut output);
         addresses.push(instruction.ip());
 
-        result.push_str(&format!("0x{:016x}    ", instruction.ip()));
-        result.push_str(&output);
-        result.push('\n');
+        instructions.push_str(&output);
+        instructions.push('\n');
+
+        let index = (instruction.ip() - address) as usize;
+
+        let bytes = Vec::from(&bytes[index..index+instruction.len()]);
+
+        let byte_string: String = bytes.iter().map(|b| format!("{:02x} ", b)).collect();
+
+        instructions_bytes.push_str(&byte_string);
+        instructions_bytes.push('\n');
     };
 
     Ok(Assembly {
-        pointer: valid_pointer,
-        text: result,
+        text: instructions,
+        bytes: instructions_bytes,
         addresses
     })
-
 }
 
 

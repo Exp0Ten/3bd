@@ -693,7 +693,7 @@ impl Base {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-enum ByteBase {
+pub enum ByteBase {
     #[default]
     Hex,
     Dec,
@@ -806,9 +806,16 @@ impl Default for PaneCode {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PaneAssembly {
+    scrollable: scrollable::Id
+}
 
-#[derive(Debug, Clone, Default)]
-struct PaneAssembly {} // TODO
+impl Default for PaneAssembly {
+    fn default() -> Self {
+        Self { scrollable: scrollable::Id::unique() }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct PaneRegisters {
@@ -837,12 +844,16 @@ pub enum LayoutMessage {
 
 #[derive(Debug, Clone)]
 pub enum PaneMessage {
+    // Control
     ControlSelectSignal(pane_grid::Pane, Signal),
+    // Registers
     RegistersChangeFormat(pane_grid::Pane, Base),
+    // Code
     CodeSelectDir(pane_grid::Pane, String),
     CodeSelectFile(pane_grid::Pane, String),
     CodeToggleUpdate(pane_grid::Pane),
     CodeScroll(pane_grid::Pane, scrollable::Viewport),
+    // Memory
     MemoryChangeFormat(pane_grid::Pane, ByteBase),
     MemoryToggleSize(pane_grid::Pane),
     MemoryInput(pane_grid::Pane, String),
@@ -850,6 +861,7 @@ pub enum PaneMessage {
     MemoryPaste(pane_grid::Pane, String),
     MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), //the i8 is as a signed multiplier, mirroring the axis
     MemoryReset(pane_grid::Pane),
+    // Terminal
     TerminalType(pane_grid::Pane, String),
     TerminalPaste(pane_grid::Pane, String),
     TerminalSend(pane_grid::Pane),
@@ -1026,7 +1038,7 @@ fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_
         Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
         Pane::Stack(pane) => (pane_view_stack(pane), pane_titlebar("CallStack", "icons/pane_stack.svg")),
         Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
-        Pane::Assembly(pane) => (pane_view_assembly(pane), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
+        Pane::Assembly(pane) => (pane_view_assembly(pane, state, id), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
         Pane::Terminal(pane) => (pane_view_terminal(pane, state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
         Pane::Info => (pane_view_info(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
 
@@ -1123,28 +1135,6 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 
 fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, pane: &'a PaneCode, line: &Option<SourceIndex>) -> Result<Row<'a, Message>, ()> {
 
-    fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
-        match address {
-            Some(address) => {
-                let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
-                button(
-                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
-                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
-                .width(Length::Fill)
-                .height(Length::Fill)
-                ).style(style::breakpoint)
-                .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
-                .width(size)
-                .height(size)
-                .padding(7)
-            },
-            None => button("")
-                .style(style::breakpoint)
-                .width(size)
-                .height(size)
-        }
-    }
-
     let (file, index) = match source.get_file(comp_path.clone(), file_path) {
         Some(file) => file,
         None => return Err(())
@@ -1190,10 +1180,32 @@ fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, p
     .padding(5))
 }
 
-pub fn code_panes_update(state: &mut State, task: &mut Option<Task<Message>>) {
+fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
+    match address {
+        Some(address) => {
+            let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
+            button(
+                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
+                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                .width(Length::Fill)
+                .height(Length::Fill)
+            ).style(style::breakpoint)
+            .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
+            .width(size)
+            .height(size)
+            .padding(7)
+        },
+        None => button("")
+            .style(style::breakpoint)
+            .width(size)
+            .height(size)
+    }
+}
+
+pub fn code_panes_update(state: &mut State, task: &mut Option<Task<Message>>) -> Option<Vec<Task<Message>>> {
     let file = match &state.internal.file {
         Some(file) => file,
-        None => return
+        None => return None
     };
     let mut tasks = Vec::new();
     let panes = &mut state.layout.panes;
@@ -1207,7 +1219,7 @@ pub fn code_panes_update(state: &mut State, task: &mut Option<Task<Message>>) {
         }
         tasks.push(code_update(*id, file, data));
     }
-    *task = Some(Task::batch(tasks));
+    Some(tasks)
 }
 
 fn code_update(id: pane_grid::Pane, file: &SourceIndex, pane: &mut PaneCode) -> Task<Message> {
@@ -1242,6 +1254,7 @@ fn code_update(id: pane_grid::Pane, file: &SourceIndex, pane: &mut PaneCode) -> 
         Task::done(Message::Pane(PaneMessage::CodeSelectFile(id, file_name))).chain(scrollable::scroll_to(pane.scrollable.clone(), scroll))
     }
 }
+
 
 
 fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
@@ -1279,12 +1292,12 @@ fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pa
     .on_press_maybe(if stopped & !state.internal.no_debug {Some(Message::Operation(Operation::SourceStep))} else {None})
     .style(style::widget_button);
 
-    let kill = svg_button("icons/signal_kill.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if stopped {Some(Message::Operation(Operation::Kill))} else {None})
+    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
     .style(style::widget_button);
 
-    let signal = svg_button("icons/signal.svg", size, Some(if stopped & pane.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if stopped & pane.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(pane.selected_signal.unwrap())))} else {None})
+    let signal = svg_button("icons/signal.svg", size, Some(if pane.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
+    .on_press_maybe(if pane.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(pane.selected_signal.unwrap())))} else {None})
     .style(style::widget_button);
 
     let signals = [
@@ -1622,17 +1635,82 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
     content
 }
 
-fn pane_view_assembly<'a>(pane: &PaneAssembly) -> Container<'a, Message> {
+fn pane_view_assembly<'a>(pane: &PaneAssembly, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     if PID.access().is_none() {
         return program_message("Start the program to display assembly instructions.");
     }
 
-    
+    let size = 30;
 
-    let content = container(text("TERMINAL"));
-    content
+    let rip = REGISTERS.access().unwrap().rip;
+
+    let assembly = if let Some(assembly) = &state.internal.assembly {
+        let breakpoints = column(
+            assembly.addresses.iter().map(|address| 
+                breakpoint_button(Some(normal(*address)), size-5).into()
+            )
+        );
+
+        let addresses = column(
+            assembly.addresses.iter().map(|address|
+                if address == &rip {
+                    text(format!("0x{:06x}", address)).style(style::line).font(BOLD)
+                } else {
+                    text(format!("0x{:06x}", address)).style(style::weak)
+                }.size(size-12).center().height(size-5).into()
+            )
+        );
+
+        let bytes = text(&assembly.bytes)
+        .size(size-12).line_height(iced::Pixels((size-5) as f32));
+
+        let instructions = text(&assembly.text)
+        .size(size-12).line_height(iced::Pixels((size-5) as f32));
+
+        scrollable(
+            row![
+                breakpoints,
+                addresses,
+                container("").width(10),
+                bytes,
+                container("").width(10),
+                instructions
+            ]
+        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+        .id(pane.scrollable.clone())
+        .height(Length::Fill)
+        .width(Length::Fill)
+    } else {
+        return program_message("Assembly not loaded.")
+    };
+    container(
+        assembly
+    ).style(style::back)
 }
 
+pub fn assembly_scroll(state: &mut State, line: usize, task: &mut Option<Task<Message>>) {
+    let panes = &state.layout.panes;
+    let offset = scrollable::AbsoluteOffset { x: 0., y: (25.*(line as f32 - 3.)).max(0.)};
+
+    for (_, pane) in panes.iter() {
+        match pane {
+            Pane::Assembly(data) => {
+                *task = Some(scrollable::scroll_to(data.scrollable.clone(), offset))
+            }
+            _ => ()
+        }
+    };
+}
+
+pub fn check_for_assembly(state: &mut State) -> bool {
+    for (_, pane) in state.layout.panes.iter() {
+        match pane {
+            Pane::Assembly(_) => return true,
+            _ => ()
+        }
+    }
+    false
+}
 
 fn pane_view_terminal<'a>(pane: &PaneTerminal, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 20;

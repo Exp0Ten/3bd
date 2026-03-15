@@ -8,7 +8,7 @@ panel = true
 panel_mode = "left" # "middle", "left", "right", "full"
 
 [layout.panes]
-main = ["code"] # next to each other
+main = ["code", "assembly"] # next to each other
 left = ["control", "memory"] # under each other
 right = ["registers", "stack"] # under each other
 panel = ["info", "terminal"] # next to each other

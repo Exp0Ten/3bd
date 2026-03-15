@@ -37,7 +37,8 @@ pub struct Internal {
     pub manual: bool,
     pub source_step: Option<trace::Breakpoints>,
     pub file: Option<crate::dwarf::SourceIndex>,
-    pub output: String
+    pub output: String,
+    pub assembly: Option<crate::dwarf::Assembly>
 }
 
 #[derive(Debug, Clone)]
