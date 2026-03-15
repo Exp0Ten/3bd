@@ -129,7 +129,8 @@ pub enum Operation {
     HandleSignal(Result<wait::WaitStatus, nix::errno::Errno>),
     Reset,
     ResetFile,
-    Read(Result<(Vec<u8>, usize), ()>)
+    Read(Result<(Vec<u8>, usize), ()>),
+    Stack(Result<Vec<(usize, String)>, ()>)
 }
 
 //TASK DEFINITION
@@ -144,6 +145,10 @@ fn task_reset() -> iced::Task<window::Message> {
 
 fn task_read() -> iced::Task<window::Message> {
     iced::Task::perform(object::read_stdout(), |result| window::Message::Operation(Operation::Read(result)))
+}
+
+fn task_stack() -> iced::Task<window::Message> {
+    iced::Task::perform(async {ui::stack_lines(call_stack())}, |result| window::Message::Operation(Operation::Stack(result)))
 }
 
 // Inner Tracing Logic
@@ -336,6 +341,12 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
             state.internal.output.push_str(&text);
         },
+        Operation::Stack(result) => {
+            match result {
+                Ok(stack) => state.internal.stack = Some(stack),
+                Err(()) => state.internal.stack = None
+            }
+        },
         _ => ()
     };
 }
@@ -487,6 +498,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         None => BREAKPOINTS.access().as_mut().unwrap().disable_all()
     };
 
+
     let assembly_task = if ui::check_for_assembly(state) { // performance reasons
         assembly_update(state, regs.rip)
     } else {
@@ -497,23 +509,28 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         *task = assembly_task;
         return;
     }
+    let mut pane_task = None;
 
     let bind = LINES.access();
     let file = bind.as_ref().unwrap().get_line(regs.rip);
     state.internal.file = file.map(|index| index.clone());
     drop(bind);
-    let code_task = ui::code_panes_update(state, task);
+    let code_task = ui::code_panes_update(state, &mut pane_task);
     match code_task {
         Some(mut inner) => {
             match assembly_task {
                 Some(asm_inner) => inner.push(asm_inner),
                 None => ()
             };
-            *task = Some(iced::Task::batch(inner))
+            pane_task = Some(iced::Task::batch(inner))
         },
-        None => *task = assembly_task
+        None => pane_task = assembly_task
     }
 
+    match pane_task {
+        Some(pane) => *task = Some(pane.chain(task_stack())),
+        None => *task = Some(task_stack())
+    };
 
 }
 

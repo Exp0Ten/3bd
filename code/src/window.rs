@@ -38,7 +38,8 @@ pub struct Internal {
     pub source_step: Option<trace::Breakpoints>,
     pub file: Option<crate::dwarf::SourceIndex>,
     pub output: String,
-    pub assembly: Option<crate::dwarf::Assembly>
+    pub assembly: Option<crate::dwarf::Assembly>,
+    pub stack: Option<Vec<(usize, String)>>
 }
 
 #[derive(Debug, Clone)]

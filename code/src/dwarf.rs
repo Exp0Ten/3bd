@@ -664,7 +664,7 @@ fn slice_to_u64(slice: &[u8]) -> u64 {
 }
 
 // CALL STACK PARSING
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallStack (pub Vec<Function>);
 
 impl CallStack {
@@ -674,7 +674,7 @@ impl CallStack {
 }
 
 type Type = DebugInfoOffset;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub parameters: Option<Vec<Parameter>>,
@@ -682,18 +682,38 @@ pub struct Function {
     pub return_type: Option<Type>,
     pub debug_info_offset: Option<DebugInfoOffset>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
     pub location: Option<Location>,
     pub constant: Option<u64>,
     pub vtype: Type
 }
-#[derive(Debug)]
+
+impl Variable {
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) {
+
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: String,
     pub location: Location,
     pub vtype: Type
+}
+
+impl Parameter {
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) {
+        let vtype = unwind_type(self.vtype, dwarf);
+        let value = vtype.value();
+        match value {
+            Some(value) => res.push((1, format!("{}: {} = {},\n", self.name, vtype.name(dwarf), value))),
+            None => res.push((1, format!("{}: {} = {} {}\n", self.name, vtype.name(dwarf), vtype.name(dwarf), '{')))
+        };
+        if value.is_ok() {return;}
+
+    }
 }
 
 pub fn call_stack<'a>() -> Result<CallStack, ()> {
@@ -803,17 +823,17 @@ fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlic
 
     let (name, return_type) = match entry.attr_value(gimli::DW_AT_specification) {
         Some(specification) => {
-            let declaration_offset = get_unit_entry_offset(DebugInfoOffset(specification.offset_value().unwrap()), dwarf);
+            let declaration_offset = get_unit_entry_offset(debug_reference(specification, unit), dwarf);
             let declaration_entry = dwarf.unit(dwarf.unit_header(declaration_offset.1).unwrap()).unwrap().entry(declaration_offset.0).unwrap();
-            let name = declaration_entry.attr(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap();
-            let return_type = match declaration_entry.attr(gimli::DW_AT_type) {
-                    Some(attr) => Some(DebugInfoOffset(attr.offset_value().unwrap())),
+            let name = string(declaration_entry.attr_value(gimli::DW_AT_name).unwrap(), dwarf);
+            let return_type = match declaration_entry.attr_value(gimli::DW_AT_type) {
+                    Some(attr) => Some(debug_reference(attr, unit)),
                     None => None
             };
             (name, return_type)
         },
         None => (
-            entry.attr(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap(),
+            string(entry.attr_value(gimli::DW_AT_name).unwrap(), dwarf),
             match entry.attr_value(gimli::DW_AT_type) {
                 Some(attr) => Some(debug_reference(attr, unit)),
                 None => None
@@ -834,7 +854,7 @@ fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlic
         debug_info_offset: None
     }, frame_base)
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Location {
     Register(gimli::Register),
     Address(u64)
@@ -1015,6 +1035,20 @@ pub enum TypeDisplay<'a> {
     Def(TypeDef<'a>),
 }
 
+impl <'a> TypeDisplay<'a> {
+    pub fn name(&self, dwarf: &'a Dwarf) -> String {
+        match self {
+           Self::Base(base) => base.name.unwrap_or("").to_string(),
+           Self::Pointer(pointer) => format!("&{}", pointer.name.unwrap_or("").to_string()),
+           Self::Modifier(modifier) => format!("{} {}", modifier.modifier, unwind_type(modifier.vtype, dwarf).name(dwarf)),
+           Self::Array(array) => array.name.to_string(),
+           Self::Struct(str) => str.name.unwrap_or("").to_string(),
+           Self::Enum(en) => en.name.to_string(),
+           Self::Def(typedef) => typedef.name.to_string(),
+        }
+    }
+}
+
 pub struct BaseType<'a> {
     pub name: Option<&'a str>,
     pub encoding: gimli::DwAte,
@@ -1039,7 +1073,18 @@ enum Modifier {
     Immutable,
     Shared,
     Volatile
-    // add the rest if you want. i couldnt care less
+} // non-exhaustive
+
+impl std::fmt::Display for Modifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Atomic => write!(f, "atomic"),
+            Self::Const => write!(f, "const"),
+            Self::Immutable => write!(f, "immutable"),
+            Self::Shared => write!(f, "shared"),
+            Self::Volatile => write!(f, "volatile"),
+        }
+    }
 }
 
 struct ArrayType<'a> {

@@ -781,7 +781,10 @@ pub struct PaneMemory {
 }
 
 #[derive(Debug, Clone, Default)]
-struct PaneStack {} // TODO
+struct PaneStack {
+    open: Vec<bool>,
+    pinned: Vec<usize>
+}
 
 #[derive(Debug, Clone)]
 pub struct PaneCode {
@@ -865,6 +868,8 @@ pub enum PaneMessage {
     TerminalType(pane_grid::Pane, String),
     TerminalPaste(pane_grid::Pane, String),
     TerminalSend(pane_grid::Pane),
+    // Stack
+
 }
 
 pub fn content(state: &State) -> Container<'_, Message> {
@@ -1483,6 +1488,53 @@ fn pane_view_stack<'a>(pane: &PaneStack) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
     content
 }
+
+pub fn stack_lines(stack: Result<CallStack, ()>) -> Result<Vec<(usize, String)>, ()> {
+    if stack.is_err() {
+        return Err(());
+    }
+
+    let functions = FUNCTIONS.access();
+    let dwarf_bind = DWARF.access();
+    let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
+
+    let mut stack = stack.unwrap();
+
+    stack.0.reverse();
+
+    let mut res = Vec::new();
+
+    for (call, function) in stack.0.iter().enumerate() {
+        let parent = match functions.as_ref().unwrap().subtype_parent.get(&function.debug_info_offset.unwrap()) {
+            Some(parent) => format!("{parent}::"),
+            None => "".to_string()
+        };
+        let return_type = match function.return_type {
+            Some(vtype) => format!(" -> {}", unwind_type(vtype, &dwarf).name(&dwarf)),
+            None => "".to_string()
+        };
+
+        if function.parameters.is_some() {
+            res.push((0, format!("{call}: {}{}(\n", parent, function.name)));
+            for param in function.parameters.as_ref().unwrap() {
+                param.lines(&mut res, &dwarf);
+            }
+            res.push((1, format!("){} \n", return_type,)));
+        } else {
+            res.push((0, format!("{call}: {}{}(){}\n", parent, function.name, return_type,)));
+        };
+        if function.variables.is_none() {
+            continue;
+        }
+
+        for var in function.variables.as_ref().unwrap() {
+            var.lines(&mut res, &dwarf)
+        }
+    };
+
+    Ok(res)
+}
+
 
 fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     fn flags(num: u64) -> String {
