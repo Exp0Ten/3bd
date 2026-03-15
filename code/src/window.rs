@@ -24,6 +24,7 @@ pub struct App {
 pub struct State {
     pub layout: Layout,
     pub internal: Internal,
+
     pub status: Option<nix::sys::wait::WaitStatus>,
     pub last_signal: Option<nix::sys::signal::Signal>,
 }
@@ -32,10 +33,11 @@ pub struct State {
 pub struct Internal {
     pub no_debug: bool,
     pub stopped: bool,
-    pub file: Option<crate::dwarf::SourceIndex>,
     pub breakpoint: bool,
     pub manual: bool,
     pub source_step: Option<trace::Breakpoints>,
+    pub file: Option<crate::dwarf::SourceIndex>,
+    pub output: String
 }
 
 #[derive(Debug, Clone)]
@@ -97,9 +99,10 @@ impl App {
         self.settings.clone()
     }
 
-//    fn subscription(&self) -> iced::Subscription<Message> {
-//        todo!()
-//    }
+    //fn subscription(&self) -> iced::Subscription<Message> {
+    //    
+    //    iced::Subscription::none()
+    //}
 
 }
 

@@ -9,6 +9,7 @@ use iced::{
 };
 
 use std::path::PathBuf;
+use std::io::Write;
 
 use nix::sys::signal::Signal;
 
@@ -784,12 +785,12 @@ struct PaneStack {} // TODO
 
 #[derive(Debug, Clone)]
 pub struct PaneCode {
-    pub update: bool,
     pub dir: Option<String>,
     pub file: Option<String>,
-    pub breakpoints: Vec<Option<u64>>,
-    pub scrollable: scrollable::Id,
-    pub viewport: Option<scrollable::Viewport>
+    update: bool,
+    breakpoints: Vec<Option<u64>>,
+    scrollable: scrollable::Id,
+    viewport: Option<scrollable::Viewport>
 }
 
 impl Default for PaneCode {
@@ -811,7 +812,7 @@ struct PaneAssembly {} // TODO
 
 #[derive(Debug, Clone, Default)]
 struct PaneRegisters {
-    pub format: Base
+    format: Base
 }
 
 #[derive(Debug, Clone, Default)]
@@ -848,7 +849,10 @@ pub enum PaneMessage {
     MemorySubmit(pane_grid::Pane),
     MemoryPaste(pane_grid::Pane, String),
     MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), //the i8 is as a signed multiplier, mirroring the axis
-    MemoryReset(pane_grid::Pane)
+    MemoryReset(pane_grid::Pane),
+    TerminalType(pane_grid::Pane, String),
+    TerminalPaste(pane_grid::Pane, String),
+    TerminalSend(pane_grid::Pane),
 }
 
 pub fn content(state: &State) -> Container<'_, Message> {
@@ -1023,7 +1027,7 @@ fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_
         Pane::Stack(pane) => (pane_view_stack(pane), pane_titlebar("CallStack", "icons/pane_stack.svg")),
         Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
         Pane::Assembly(pane) => (pane_view_assembly(pane), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
-        Pane::Terminal(pane) => (pane_view_terminal(pane), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
+        Pane::Terminal(pane) => (pane_view_terminal(pane, state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
         Pane::Info => (pane_view_info(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
 
         _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
@@ -1118,6 +1122,7 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
 }
 
 fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, pane: &'a PaneCode, line: &Option<SourceIndex>) -> Result<Row<'a, Message>, ()> {
+
     fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
         match address {
             Some(address) => {
@@ -1144,7 +1149,6 @@ fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, p
         Some(file) => file,
         None => return Err(())
     };
-
     if file.content.is_none() {
         return Err(())
     }
@@ -1152,7 +1156,6 @@ fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, p
     let size = 25;
 
     let mut lines = Vec::new();
-
     let breakpoints = column(
         pane.breakpoints.iter().enumerate().map(|(index, address)| {
             lines.push(index);
@@ -1239,6 +1242,7 @@ fn code_update(id: pane_grid::Pane, file: &SourceIndex, pane: &mut PaneCode) -> 
         Task::done(Message::Pane(PaneMessage::CodeSelectFile(id, file_name))).chain(scrollable::scroll_to(pane.scrollable.clone(), scroll))
     }
 }
+
 
 fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 30;
@@ -1619,13 +1623,51 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
 }
 
 fn pane_view_assembly<'a>(pane: &PaneAssembly) -> Container<'a, Message> {
+    if PID.access().is_none() {
+        return program_message("Start the program to display assembly instructions.");
+    }
+
+    
+
     let content = container(text("TERMINAL"));
     content
 }
 
-fn pane_view_terminal<'a>(pane: &PaneTerminal) -> Container<'a, Message> {
-    let content = container(text("TERMINAL"));
-    content
+
+fn pane_view_terminal<'a>(pane: &PaneTerminal, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+    let size = 20;
+
+    if PID.access().is_none() {
+        return program_message("Start the program to display the terminal.");
+    }
+
+    if STDIO.access().is_none() {
+        return program_message("Terminal is set to external.");
+    }
+
+    let input = text_input("Input...", &pane.input)
+    .size(size-5).line_height(iced::Pixels(size as f32))
+    .on_input(move |text| Message::Pane(PaneMessage::TerminalType(id, text)))
+    .on_paste(move |text| Message::Pane(PaneMessage::TerminalPaste(id, text)))
+    .on_submit(Message::Pane(PaneMessage::TerminalSend(id)));
+
+    let output = container(
+        scrollable(
+            text(format!("{}_", state.internal.output)).size(size-5).line_height(0.95)
+        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+        .anchor_bottom()
+        .anchor_left()
+        .height(Length::Fill)
+        .width(Length::Fill)
+    ).padding(5)
+    .style(style::terminal);
+
+
+    container(column![
+        output,
+        input
+    ].spacing(5)).style(style::back).padding(2)
+
 }
 
 fn pane_view_info<'a>() -> Container<'a, Message> {
@@ -1754,8 +1796,11 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
     let panes = &mut state.layout.panes;
 
     match message {
+        // Control
         PaneMessage::ControlSelectSignal(pane, signal) => get_pane(panes, pane).control().selected_signal = Some(signal),
+        // Registers
         PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
+        // Code
         PaneMessage::CodeSelectDir(pane, dir) => {
             let data = get_pane(panes, pane).code();
             data.viewport = None;
@@ -1791,7 +1836,8 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             drop(bind);
             let mut path = comp_dir.clone();
             path.push(&file_path);
-            if let Ok(file) = object::read_source(&path) {
+            if let Ok(mut file) = object::read_source(&path) {
+                process_string(&mut file);
                 let mut bind = SOURCE.access();
                 let source = bind.as_mut().unwrap();
                 source.get_mut(&comp_dir).unwrap().get_mut(index).unwrap().content = Some(file.clone());
@@ -1806,9 +1852,11 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             }
         },
         PaneMessage::CodeScroll(pane, view) => get_pane(panes, pane).code().viewport = Some(view),
+        // Memory
         PaneMessage::MemoryChangeFormat(pane, base) => get_pane(panes, pane).memory().format = base,
         PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
         PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
+        PaneMessage::MemoryPaste(pane, data) => get_pane(panes, pane).memory().field = data, // perhaps sumbit right away
         PaneMessage::MemorySubmit(pane) => {
             let data = get_pane(panes, pane).memory();
             let field = &data.field;
@@ -1886,8 +1934,28 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             data.incorrect = false;
             update_memory(data);
         },
+        // Terminal
+        PaneMessage::TerminalType(pane, data) => get_pane(panes, pane).terminal().input = data,
+        PaneMessage::TerminalPaste(pane, data) => get_pane(panes, pane).terminal().input = data,
+        PaneMessage::TerminalSend(pane) => {
+            let data = get_pane(panes, pane).terminal();
+            data.input.push('\n');
+
+            if object::stdio().write(data.input.as_bytes()).is_err() {
+                return;
+            };
+            data.input.clear();
+        },
         _ => ()
     };
+}
+
+pub fn process_string(file: &mut String) {
+    *file = file.chars().map(|char| match char {
+        '\n' => "\n".to_string(),
+        '\t' => "    ".to_string(),
+        _ => if char.is_ascii_control() {"".to_string()} else {char.to_string()}
+    }).collect()
 }
 
 fn create_breakpoints(comp_path: PathBuf, index: usize, pane: &mut PaneCode, len: usize) {
@@ -1943,11 +2011,9 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
     };
 
     pane.read_address = new;
-    println!(".");
 
     let data = read_memory(new, 4096);
     if data.is_err() { // some error idk
-        println!("e");
         pane.read_error = true;
         return;
     }
@@ -2070,7 +2136,6 @@ fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big res
     if layout.sidebar_right {
         let (right, right_old_ratio) = layout.get_right_split();
         let new_ratio = (1.0 - (1.0 - (right_old_ratio * (1.0 - left_old_ratio)) - left_old_ratio) - ratio as f64)/(1.0 - ratio as f64);
-        //println!("{new_ratio}");
         layout.panes.resize(left, limit(ratio));
         layout.panes.resize(right, limit(new_ratio as f32));
     } else {

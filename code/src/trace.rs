@@ -128,7 +128,8 @@ pub enum Operation {
     BreakpointRemove(u64),
     HandleSignal(Result<wait::WaitStatus, nix::errno::Errno>),
     Reset,
-    ResetFile
+    ResetFile,
+    Read(Result<(Vec<u8>, usize), ()>)
 }
 
 //TASK DEFINITION
@@ -141,8 +142,8 @@ fn task_reset() -> iced::Task<window::Message> {
     iced::Task::done(window::Message::Operation(Operation::Reset))
 }
 
-fn task_reset_file() -> iced::Task<window::Message> {
-    iced::Task::done(window::Message::Operation(Operation::ResetFile))
+fn task_read() -> iced::Task<window::Message> {
+    iced::Task::perform(object::read_stdout(), |result| window::Message::Operation(Operation::Read(result)))
 }
 
 // Inner Tracing Logic
@@ -150,13 +151,18 @@ fn task_reset_file() -> iced::Task<window::Message> {
 pub fn operation_message(state: &mut window::State, operation: Operation, task: &mut Option<iced::Task<window::Message>>) {
     match operation {
         Operation::LoadFile => {
-            if FILE.access().is_some() {
-                reset_file(state);
-            }
+            let reset = FILE.access().is_some();
+
             let file = match Dialog::file(None, None) {
                 Some(file) => file,
                 None => return
             };
+            if reset {
+                if reset_file(state).is_err() {
+                    return;
+                };
+            }
+
             match object::test_file(&file) {
                 Ok(_) => (),
                 Err(()) => return
@@ -177,12 +183,20 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             }
             panes_preload(state, task);
         },
+
         Operation::RunTracee => {
-            let pid = match object::run_tracee(FILE.access().as_ref().unwrap(), Vec::new(), None) {
+            let stdio = match object::open_child_stdio() {
+                Ok(stdio) => stdio,
+                Err(()) => return
+            };
+
+            let pid = match object::run_tracee(FILE.access().as_ref().unwrap(), Vec::new(), Some(stdio)) {
                 Err(_) => return,
                 Ok(pid) => {PID.sets(Pid::from_raw(pid)); Pid::from_raw(pid)},
             };
             tracee_setup(state, pid);
+
+            *task = Some(task_read());
         },
         Operation::StopTracee => {
             if PID.access().is_none() {
@@ -192,6 +206,9 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 Ok(_) => (),
                 Err(()) => return
             };
+
+            let _ = object::close_child_stdio();
+
             *task = Some(task_reset());
         },
         Operation::Step => {
@@ -282,7 +299,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         Operation::BreakpointRemove(addr) => {BREAKPOINTS.access().as_mut().unwrap().rem(addr);},
 
         Operation::HandleSignal(Ok(status)) => handle(state, status, task),
-        Operation::HandleSignal(Err(err)) => *task = match Dialog::warning_choice(&format!("Encountered an error while waiting for the tracee program: {}\nDo you wish to try again? (selecting no will kill the tracee.)", err), Some("Trace Error")) {
+        Operation::HandleSignal(Err(err)) => *task = match Dialog::warning_choice(&format!("Encountered an error while waiting for the tracee program: {}\nDo you wish to try again? (selecting no will kill the tracee)", err), Some("Trace Error")) {
             rfd::MessageDialogResult::Yes => Some(iced::Task::perform(wait_async(PID.access().unwrap()), |result| window::Message::Operation(Operation::HandleSignal(result)))),
             _ => Some(iced::Task::done(window::Message::Operation(Operation::StopTracee)))
         },
@@ -292,10 +309,30 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             state.internal.manual = false;
             state.internal.breakpoint = false;
             state.internal.file = None;
+            state.internal.output.clear();
             state.last_signal = None;
             reset();
         },
-        Operation::ResetFile => reset_file(state),
+        Operation::ResetFile => {let _ = reset_file(state);},
+
+        Operation::Read(result) => {
+            if result.is_err() {
+                return;
+            }
+
+            *task = Some(task_read());
+
+            let data = result.unwrap();
+            if data.1 == 0 {
+                return;
+            }
+
+            let mut text: String = data.0[..data.1].iter().map(|byte| *byte as char).collect();
+
+            ui::process_string(&mut text);
+
+            state.internal.output.push_str(&text);
+        },
         _ => ()
     };
 }
@@ -460,10 +497,10 @@ fn reset() {
     MAPS.none();
 }
 
-fn reset_file(state: &mut window::State) {
+fn reset_file(state: &mut window::State) -> Result<(), ()> {
     if PID.access().is_some() {
         match Dialog::warning_choice("The program is still running. Are you sure you want to stop the process and discard of the file?", None) {
-            rfd::MessageDialogResult::No => return,
+            rfd::MessageDialogResult::No => return Err(()),
             _ => ()
         }
         reset();
@@ -479,6 +516,7 @@ fn reset_file(state: &mut window::State) {
     unsafe {
         DATA = Vec::new()
     };
+    Ok(())
 }
 
 fn state_cont(state: &mut window::State) {
@@ -646,14 +684,14 @@ fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> {
 //    Ok(())
 //}
 
-fn kill_tracee(pid: Pid) -> Result<Option<String>, ()> {
+fn kill_tracee(pid: Pid) -> Result<(), ()> {
     close_memory();
     match ptrace::kill(pid) {
         Ok(()) => (),
         Err(err) => {Dialog::error(&format!("Could not stop the tracee: {}", err), Some("Trace error")); return Err(());}
     };
-
-    Ok(object::close_child_stdio())
+    let _ = object::close_child_stdio();
+    Ok(())
 }
 
 fn restart_tracee(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { //also used for signaling the tracee

@@ -26,7 +26,7 @@ type Global<T> = Mutex<Option<T>>;
 
 pub static CONFIG: Global<config::Config> = empty();
 pub static FILE: Global<std::path::PathBuf> = empty();
-pub static STDIO: Global<(PipeWriter, PipeReader)> = empty();
+pub static STDIO: Global<std::os::fd::OwnedFd> = empty();
 pub static PID: Global<Pid> = empty();
 pub static PROC_PATH: Global<path::PathBuf> = empty();
 pub static MAPS: Global<Vec<trace::MemoryMap>> = empty();

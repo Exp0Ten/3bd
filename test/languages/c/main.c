@@ -7,7 +7,8 @@ void hii() {
 
 int main() {
     int g = 0;
-    g = 0;
+	// Hello
+	int h;
     g = 0;
     g = 0;
     g = 0;

@@ -28,7 +28,6 @@ mod window;     // window handle
 use crate::data::*;
 
 fn main() {
-    //println!("hii");
     //test::test();
     CONFIG.sets(config::Config::default());
 

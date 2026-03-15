@@ -158,7 +158,7 @@ pub fn widget_button_toggled(theme: &Theme, status: button::Status) -> button::S
     }
 }
 
-pub fn breakpoint(theme: &Theme, status: button::Status) -> button::Style {
+pub fn breakpoint(_theme: &Theme, _status: button::Status) -> button::Style {
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
         ..Default::default()
@@ -174,7 +174,7 @@ pub fn breakpoint_svg(theme: &Theme, status: svg::Status) -> svg::Style {
     }
 }
 
-pub fn breakpoint_svg_toggled(theme: &Theme, status: svg::Status) -> svg::Style {
+pub fn breakpoint_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(theme.extended_palette().danger.base.color)
     }
@@ -194,6 +194,21 @@ pub fn address(theme: &Theme, status: text_input::Status, incorrect: bool) -> te
 pub fn line(theme: &Theme) -> text::Style {
     text::Style { color: Some(theme.extended_palette().primary.base.color) }
 }
+
+pub fn terminal(theme: &Theme) -> container::Style {
+    let pallete = theme.extended_palette();
+    container::Style {
+        border: Border {
+            radius: Radius::new(5),
+            color: pallete.secondary.base.color,
+            width: 2.
+        },
+        ..Default::default()
+    }
+}
+
+// Color Helpers
+
 fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color {
     Color {
         r: color_b.r * factor + color_a.r * (1.-factor),
