@@ -44,7 +44,7 @@ impl Default for Layout {
     }
 }
 
-const SIDERATIO: f32 = 0.25; // (0.1; 0.5)
+const SIDERATIO: f32 = 0.25; // (0.1; 0.4)
 
 impl Layout {
     fn panes_config() -> pane_grid::State<Pane> {
@@ -704,7 +704,7 @@ impl ByteBase {
         match self {
             Self::Hex => format!("{:02x}", num),
             Self::Dec => format!("{}", num),
-            Self::Chr => format!("' {} '", if num.is_ascii_graphic() {num as char} else {' '}),
+            Self::Chr => format!("{}", if num.is_ascii_graphic() {(num as char).to_string()} else {if num == 0x20 {"' '"} else {"'.'"}.to_string()}),
         }
     }
 }
@@ -821,7 +821,7 @@ struct PaneControl {
 
 #[derive(Debug, Clone, Default)]
 struct PaneTerminal {
-    text: String
+    input: String
 }
 
 #[derive(Debug, Clone)]
@@ -921,11 +921,11 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
     fn status_text<'a>(string: String, mut content: Row<'a, Message>, size: u16, style: Option<impl Fn(&Theme) -> text::Style + 'a>) -> Row<'a, Message> {
         content = if style.is_some() {
             content.push(
-                text(string).size(size).style(style.unwrap())
+                text(string).size(size).center().style(style.unwrap())
             )
         } else {
             content.push(
-                text(string).size(size)
+                text(string).size(size).center()
             )
         };
         content
@@ -1418,7 +1418,7 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
 
         let address_column: iced::widget::Column<'_, Message> = column(
             addresses.iter().map(|addr| text(
-                format!("0x...{:06x}", addr)
+                format!("0x{:06x}", addr)
             ).size(size - 5)
             .height(size)
             .center()
@@ -1434,11 +1434,16 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
             .center()
             .style(style::widget_text)
             .into())
-        ).into()))
-        .spacing(match pane.format {
+        ).align_x(iced::Alignment::Center)
+        .width(match pane.format {
+            ByteBase::Chr => Length::Fixed(20 as f32),
+            _ => Length::Shrink
+        })
+        .into())
+        ).spacing(match pane.format {
             ByteBase::Hex => 10,
-            ByteBase::Chr => 15,
-            ByteBase::Dec => 20
+            ByteBase::Chr => 10,
+            ByteBase::Dec => 15
         });
 
         container(mouse_area(
@@ -1624,9 +1629,119 @@ fn pane_view_terminal<'a>(pane: &PaneTerminal) -> Container<'a, Message> {
 }
 
 fn pane_view_info<'a>() -> Container<'a, Message> {
-    let content = container(text("INFO"));
-    content
+    let bind = EHFRAME.access();
+    if bind.is_none() {
+        return program_message("Load the program to display ELF info.");
+    };
+    let file = match &bind.as_ref().unwrap().object {
+        ::object::File::Elf64(elf) => elf,
+        _ => panic!()
+    };
+
+    let elf_header = file.elf_header();
+    let info = [
+        ("Class:", InfoNamed::class(elf_header.e_ident.class)),
+        ("Data:", InfoNamed::data(elf_header.e_ident.data)),
+        ("Version:", &elf_header.e_ident.version.to_string()),
+        ("OS/ABI", InfoNamed::os(elf_header.e_ident.os_abi)),
+        ("ABI Version:", &elf_header.e_ident.abi_version.to_string()),
+        ("Type:", InfoNamed::typ(elf_header.e_type.get(file.endian()))),
+        ("Machine:", InfoNamed::machine(elf_header.e_machine.get(file.endian()))),
+        ("Entry point address:", &format!("0x{:x}", elf_header.e_entry.get(file.endian()))),
+        ("Program headers:", &format!("{} (offset into the file)", elf_header.e_phoff.get(file.endian()))),
+        ("Section headers:", &format!("{} (offset into the file)", elf_header.e_shoff.get(file.endian()))),
+    ];
+
+    let size = 20;
+
+    let field = column(info.iter().map(|(field, _)| {
+        text(field.to_string()).size(size-5).center().height(size).wrapping(text::Wrapping::None).into()
+    }));
+
+    let value = column(info.iter().map(|(_, value)| {
+        text(value.to_string()).size(size-5).center().height(size).style(style::widget_text).wrapping(text::Wrapping::None).into()
+    }));
+
+    let data = row![
+        field, value
+    ].padding(5).spacing(30);
+
+    container(
+        data
+    ).width(Length::Fill).height(Length::Fill).style(style::back)
+
 }
+
+struct InfoNamed;
+
+impl InfoNamed {
+    fn class(x: u8) -> &'static str {
+        match x {
+            1 => "ELF32",
+            2 => "ELF64",
+            _ => "Invalid Class"
+        }
+    }
+
+    fn data(x: u8) -> &'static str {
+        match x {
+            1 => "Little Endian",
+            2 => "Big Endian",
+            _ => "Unknown"
+        }
+    }
+
+    fn os(x: u8) -> &'static str {
+        match x {
+            0 => "System V",
+            1 => "HP-UX",
+            2 => "NetBSD",
+            3 => "Linux",
+            4 => "GNU Hurd", // I did not miss 5, 5 is reserved :D
+            6 => "Solaris",
+            7 => "AIX",
+            8 => "IRIX",
+            9 => "FreeBSD",
+            10 => "Tru64",
+            11 => "Novell Modesto",
+            12 => "OpenBSD",
+            13 => "OpenVMS",
+            14 => "NonStop Kernel",
+            15 => "AROS",
+            16 => "FenixOS",
+            17 => "Nuxi CloudABI",
+            18 => "Stratus Technologies OpenVOS",
+            _ => "Unknow OS"
+        }
+    }
+
+    fn typ(x: u16) -> &'static str {
+        match x {
+            1 => "REL (Relocatable file)",
+            2 => "EXEC (Executable file)",
+            3 => "DYN (Position-independent exec)",
+            4 => "CORE (Core file.)",
+            0xFE00|
+            0xFEFF|
+            0xFF00|
+            0xFFFF => "Reserved.",
+            _ => "Unknown Type"
+        }
+    }
+
+    fn machine(x: u16) -> &'static str { // im using abbreviated names for simplicity
+        match x {
+            0 => "Unspecified",
+            1 => "AT&T",
+            0x02 => "SPARC",
+            0x03 => "x86",
+            0x06 => "Intel",
+            0x3e => "AMD x86-64",
+            _ => "Unknown or Unsupported Machine" // My program really supports only x86-64 so I dont have to write them out now
+        }
+    }
+}
+
 
 
 //PaneMessage Handle (Mainframe Operations)
@@ -1644,6 +1759,9 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         PaneMessage::CodeSelectDir(pane, dir) => {
             let data = get_pane(panes, pane).code();
             data.viewport = None;
+            if data.dir == Some(dir.clone()) {
+                return;
+            }
             data.dir = Some(dir);
             data.file = None;
         },
@@ -1792,7 +1910,7 @@ fn create_breakpoints(comp_path: PathBuf, index: usize, pane: &mut PaneCode, len
     pane.breakpoints = buf;
 }
 
-pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
+pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
     let current = pane.address;
     let limit = pane.read_address;
 
@@ -1812,8 +1930,12 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
 
     match test_memory(new) {
         Err(true) => new = get_map_range(current).unwrap().start,
+        _ => ()
+    };
+
+    match test_memory(new + 2048) {
         Err(false) => new = get_map_range(current).unwrap().end - 4096,
-        Ok(()) => ()
+        _ => ()
     };
 
     if new == limit {
@@ -1821,9 +1943,11 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested
     };
 
     pane.read_address = new;
+    println!(".");
 
     let data = read_memory(new, 4096);
     if data.is_err() { // some error idk
+        println!("e");
         pane.read_error = true;
         return;
     }
