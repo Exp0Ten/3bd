@@ -71,8 +71,8 @@ impl ImplSourceMap for SourceMap {
         if self.contains_key(&hash_dir) {
             let v =self.get_mut(&hash_dir).unwrap();
             for i in 0..v.len() {
-                //if v[i] == source_file {
-                if v[i].path == source_file.path {
+                if v[i] == source_file {
+                //if v[i].path == source_file.path {
                     return SourceIndex::new(hash_dir, i, line_number);
                 }
             }
@@ -118,7 +118,7 @@ pub trait ImplLineAddresses<'a> {
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
         match EXEC_SHIFT.access().as_ref() {
-            Some(shift) => if *shift > address {return None},
+            Some(shift) => if *shift > address {println!("HOLD ON {:x} {:x}", shift, address); return None},
             None => ()
         }
         self.get(&normal(address))
@@ -306,28 +306,6 @@ pub fn get_main_file() -> (String, String) {
 
     (String::from(comp_dir.to_str().unwrap()), String::from(file_path.to_str().unwrap()))
 }
-
-/*
-
-Okay, i spent WAY TOO LONG on this and i have to explain:
-
-So, we have dwarf info. nice. but compilers tend to (AS THEY SHOULD) add information from ALL of the compiled files.
-This would be fine, if it werent for the SHEER amount of data, specifically in Rusts Dwarf output and hiararchy.
-The point is, i wanted to include only the files written by the user, as those are the only ones that usually need debugging.
-But rust creates hashlike names for all of the files when linking the libraries, and you know what that means.
-I have no way of telling, if the file is actually the input, or just some library.
-
-APART FROM THE FACT I DO! HAHAHA!
-
-nice so i CANNNN actually tell them apart. but now it comes down to that id have to make an exception in the code for rust and any other language that decides to play stupid.
-So, yeaaa. Weird, but its not too bad. I can just filter them out looking at the second entry in the comp unit in .debug_info:
-it needs to be declaring a namespace AND the name has to be Rust. then there might be still some extra, but those can be dealt with by choosing only a single compilation directory.
-
-Otherwise, yea, its pretty easy, although i might have to have more compilation directories and/or filter ones like "lib" and etc.
-
-good luck
-
-*/
 
 // FUNCTION RANGES
 
@@ -593,11 +571,11 @@ fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &
         gimli::RegisterRule::Register(register) => Ok(*match_register(register, regs)),
         gimli::RegisterRule::Constant(value) => Ok(*value),
         gimli::RegisterRule::SameValue => Err(()),
-        _ => unimplemented!() // NOW THIS IS NOT IMPLEMENTED SO LETS HOPE IT WONT BE NEEDED YK :P
+        _ => unimplemented!()
     }
 }
 
-fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_regs_struct) -> &'a mut u64 { // Only these registers are used in expression and locations, if not im gonna cry
+fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_regs_struct) -> &'a mut u64 {
     match *register {
         gimli::X86_64::RAX => &mut regs.rax,
         gimli::X86_64::RBX => &mut regs.rbx,
@@ -607,21 +585,21 @@ fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_
         gimli::X86_64::RDI => &mut regs.rdi,
         gimli::X86_64::RSP => &mut regs.rsp,
         gimli::X86_64::RBP => &mut regs.rbp,
-        gimli::X86_64::R8 => &mut regs.r8,
-        gimli::X86_64::R9 => &mut regs.r9,
+        gimli::X86_64::R8 =>  &mut regs.r8,
+        gimli::X86_64::R9 =>  &mut regs.r9,
         gimli::X86_64::R10 => &mut regs.r10,
         gimli::X86_64::R11 => &mut regs.r11,
         gimli::X86_64::R12 => &mut regs.r12,
         gimli::X86_64::R13 => &mut regs.r13,
         gimli::X86_64::R14 => &mut regs.r14,
         gimli::X86_64::R15 => &mut regs.r15,
-        gimli::X86_64::RA => &mut regs.rip,
-        _ => unimplemented!("THIS HAS TO BE ENOUGH RIGHT") // use result later - URL
+        gimli::X86_64::RA =>  &mut regs.rip,
+        _ => unimplemented!()
     }
 }
 
 fn unwind_memory(address: u64, size: u8) -> Vec<u8> { // for reading small amounts of data from the memory (a wrapper)
-    trace::read_memory(address, size as usize).expect("CORRUPTED DWARF OR IDK WTFFFF")
+    trace::read_memory(address, size as usize).expect("Memory Unwind Exception")
 }
 
 fn eval_expression<'a>(
@@ -637,11 +615,11 @@ fn eval_expression<'a>(
     loop {
         match result {
             gimli::EvaluationResult::Complete => break,
-            gimli::EvaluationResult::RequiresMemory { address, size, space, base_type } => { // TODO if the size needs implementation
+            gimli::EvaluationResult::RequiresMemory { address, size, .. } => {
                 let data = unwind_memory(address, size);
-                result = evaluation.resume_with_memory(gimli::Value::U64(slice_to_u64(&data))).expect("Something failed");
+                result = evaluation.resume_with_memory(gimli::Value::U64(slice_to_u64(&data))).map_err(|_| ())?;
             },
-            gimli::EvaluationResult::RequiresRegister { register, base_type } => { // TODO if the type needs implementation
+            gimli::EvaluationResult::RequiresRegister { register, .. } => {
                 result = evaluation.resume_with_register(gimli::Value::U64(*match_register(&register, regs))).map_err(|_| ())?;
             },
             gimli::EvaluationResult::RequiresFrameBase => {
@@ -724,6 +702,7 @@ impl Parameter {
 pub fn call_stack<'a>() -> Result<CallStack, ()> {
     let mut call_stack = CallStack::new();
 
+    println!("call");
 
     let mut registers = REGISTERS.access().unwrap();
 
@@ -742,11 +721,13 @@ pub fn call_stack<'a>() -> Result<CallStack, ()> {
     );
 
     loop {
+        print!(".");
         if unwind(&mut call_stack, bindings, &mut registers)? {
             break;
         };
     }
 
+    println!("ok");
     Ok(call_stack)
 }
 
@@ -775,30 +756,44 @@ fn unwind (
 
     // We need info about the function and all
     let index = get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
+    print!("a");
     let unit = source_map.get(&index.hash_path).unwrap()[index.index].compile_unit; // our function index is unit organised for faster lookup speed. this is possible thanks to the hashmap, which has constant access time, while searching through ranges is linear access time (in the end, this is MUCH faster, especially with more functions and source files)
+    print!("b");
     let function = function_index.get_function(normal(regs.rip), unit).unwrap(); // now we get our function offset into the debug_info_section
+    print!("c");
     let unit_header = dwarf.debug_info.header_from_offset(unit).unwrap();
+    print!("d");
     let dwarf_unit = dwarf.unit(unit_header).unwrap();
 
+    print!("e");
     let offset = function.to_unit_offset(&dwarf_unit).unwrap();
+    print!("f");
     let mut entries = dwarf_unit.entries_at_offset(offset).unwrap();
+    print!("g");
     let _ = entries.next_entry();
+    print!("h");
     let die = entries.current().unwrap();
+    print!("i");
     let (mut function_info, frame_attribute) = extract_function_info(die, &dwarf, &dwarf_unit);
 
+    print!("j");
     function_info.debug_info_offset = Some(function);
 
+    print!("k");
     let unwind_info = get_unwind_for_address(normal(regs.rip), (&gimli_eh_frame, eh_frame));
+    print!("l");
     let encoding = dwarf_unit.encoding();
+    print!("m");
     let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
 
-    unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
 
+
+    print!("o");
     let frame_base = if frame_attribute.is_some() {
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
         let frame_base = eval_expression(&expression, regs, Some(cfa), None, encoding)?[0];
         match frame_base.location {
-            gimli::Location::Address { address } => Some(address), // LETS HOPE PLEASE // WHY IS IT CALLED ADDRESS WHEN ITS A VALUE OMGGGGGGGGGGGG
+            gimli::Location::Address { address } => Some(address),
             gimli::Location::Register {register} => Some(*match_register(&register, regs)),
             _ => panic!("huh")
         }
@@ -806,19 +801,30 @@ fn unwind (
         None
     };
 
-    extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
+    print!("p");
+    //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
+    new_ev(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
+
+    print!("n");
+    unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
+
+    print!("q");
     if function_info.variables.as_ref().unwrap().len() == 0 { //space opt
         function_info.variables = None
     };
 
+    print!("r");
     if function_info.parameters.as_ref().unwrap().len() == 0 { //space opt
         function_info.parameters = None
     };
 
+    print!("s");
     let main_function = check_for_main(&function_info, eh_frame);
 
+    print!("t");
     call_stack.0.push(function_info);
 
+    print!("u");
     if main_function {return Ok(true);}
 
     Ok(false)
@@ -865,6 +871,7 @@ pub enum Location {
     Address(u64)
 }
 
+/*
 fn extract_variables<'a>(
     function: &mut Function,
     regs: &mut nix::libc::user_regs_struct,
@@ -902,18 +909,18 @@ fn extract_variables<'a>(
         if entry.tag() == gimli::DW_TAG_variable {
             let declaration = entry.attr(gimli::DW_AT_decl_line).unwrap().udata_value().unwrap();
 
-            if declaration > current_line {continue;}; // if you have a variable you havent declared yet, you dont want to show it right, cause its gonna be random gibberish yk
+            if declaration >= current_line {continue;}; // if you have a variable you havent declared yet, you dont want to show it right, cause its gonna be random gibberish yk
 
             let name = String::from(
-                match entry.attr(gimli::DW_AT_name) {
-                    Some(attr) => attr.string_value(&dwarf.debug_str).unwrap().to_string().unwrap(), //URL
+                match entry.attr_value(gimli::DW_AT_name) {
+                    Some(attr) => string(attr, dwarf), //URL
                     None => "0"
                 }
             );
 
             let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
 
-            let location = match entry.attr(gimli::DW_AT_location) {
+            let location = match entry.attr_value(gimli::DW_AT_location) {
                 Some(attr) => {
                     if attr.exprloc_value().is_some() {
                         let expression = attr.exprloc_value().unwrap();
@@ -925,7 +932,7 @@ fn extract_variables<'a>(
                             _ => panic!()
                         }
                     } else {
-                        let loclist = gimli::LocationListsOffset(attr.udata_value().unwrap() as usize);
+                        let loclist = loclist_reference(attr, unit);
                         Some(get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding)?)
                     }
                 },
@@ -952,15 +959,15 @@ fn extract_variables<'a>(
 
         if entry.tag() == gimli::DW_TAG_formal_parameter {
             let name = String::from(
-                match entry.attr(gimli::DW_AT_name) {
-                    Some(attr) => attr.string_value(&dwarf.debug_str).unwrap().to_string().unwrap(), //URL
+                match entry.attr_value(gimli::DW_AT_name) {
+                    Some(attr) => string(attr, dwarf), //URL
                     None => "0"
                 }
             );
 
             let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
 
-            let location = match entry.attr(gimli::DW_AT_location) {
+            let location = match entry.attr_value(gimli::DW_AT_location) {
                 Some(attr) => {
                     if attr.exprloc_value().is_some() {
                         let expression = attr.exprloc_value().unwrap();
@@ -972,7 +979,7 @@ fn extract_variables<'a>(
                             _ => panic!()
                         }
                     } else {
-                        let loclist = gimli::LocationListsOffset(attr.udata_value().unwrap() as usize); //URL
+                        let loclist = loclist_reference(attr, unit); //URL
                         get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding)?
                     }
                 },
@@ -991,17 +998,124 @@ fn extract_variables<'a>(
         // + there are other ones but whatever for now
     }
 }
+*/
+
+
+
+fn new_ev<'a>(
+    function: &mut Function,
+    regs: &mut nix::libc::user_regs_struct,
+    frame_base: Option<u64>,
+    mut entries: gimli::EntriesCursor<'_, EndianSlice<'a, Endian>>,
+    dwarf: &'a Dwarf,
+    encoding: gimli::Encoding,
+    current_line: u64,
+    unit: &Unit
+) -> Result<(), ()> {
+    let fn_depth = entries.depth(); // saving the original depth
+    let mut first = true;
+    entries.next_entry().unwrap(); //move from the Subprogram Entry
+
+    let variables = function.variables.as_mut().unwrap(); // References to the function struct
+    let parameters = function.parameters.as_mut().unwrap();
+
+    loop {
+        println!("{:?}", variables);
+        println!("{:?}", parameters);
+        if !first { // Would skip over the first entry otherwise and we dont want that
+            match entries.current() {
+                Some(entry) => match entry.tag() {
+                    gimli::DW_TAG_subprogram | gimli::DW_TAG_inlined_subroutine => {entries.next_sibling().map_err(|_| ())?;} // skipping subfunctions and inlines (those have their own variables and parameters)
+                    _ => {entries.next_entry().map_err(|_| ())?;}
+                },
+                None => {entries.next_entry().map_err(|_| ())?;}
+            }
+        } else {
+            first = false;
+        }
+        println!("{}", entries.depth());
+        if fn_depth == entries.depth() { // if the new entry has the same depth as the original fn_depth, then they are siblings and therefore we ran into the end of the function locals definition // we cant just use the null entry, because the some variables can be in deeper lexical fields, so this is the easiest
+            return Ok(());
+        }
+
+        let entry = match entries.current() { // skip null entries
+            Some(entry) => entry,
+            None => continue
+        };
+
+        if (entry.tag() != gimli::DW_TAG_variable) && (entry.tag() != gimli::DW_TAG_formal_parameter) {
+            continue;
+        }
+
+        let name = String::from(
+            match entry.attr_value(gimli::DW_AT_name) {
+                Some(attr) => string(attr, dwarf), //URL
+                None => "0"
+            }
+        );
+        let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
+
+        let location = match entry.attr_value(gimli::DW_AT_location) { // we find the location (either from evaluating the expression, or by looking up the location list)
+            Some(attr) => {
+                if attr.exprloc_value().is_some() {
+                    let expression = attr.exprloc_value().unwrap();
+                    let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
+                    match piece.location {
+                        gimli::Location::Register {register} => Some(Location::Register(register)),
+                        gimli::Location::Value {value} => Some(Location::Address(value.to_u64(NOMASK).unwrap())),
+                        gimli::Location::Address {address} => Some(Location::Address(address)),
+                        _ => panic!()
+                    }
+                } else {
+                    if let Some(loclist) = dwarf.attr_locations(unit, attr).map_err(|_| ())? {
+                        get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding).map_or(None, |loc| Some(loc))
+                    } else {
+                        None
+                    }
+                }
+            },
+            None => None
+        };
+        let constant = match entry.attr(gimli::DW_AT_const_value) {
+            Some(attr) => match attr.udata_value() {
+                Some(val) => Some(val),
+                None => {println!("WTF CONSTANT"); None} // i want to know if it does some weird shit
+            },
+            None => None
+        };
+
+        if entry.tag() == gimli::DW_TAG_variable {
+            let declaration = number(entry.attr_value(gimli::DW_AT_decl_line).unwrap());
+
+            if declaration >= current_line {continue;}; // if you have a variable you havent declared yet, you dont want to show it right, cause its gonna be random gibberish yk
+
+            let var = Variable {
+                name,
+                location,
+                constant,
+                vtype
+            };
+            variables.push(var);
+        } else {
+            let param = Parameter {
+                name,
+                location: location.unwrap(),
+                vtype
+            };
+            parameters.push(param);
+        }
+    }
+}
 
 fn get_loclist_location(
-    loc_list: gimli::LocationListsOffset<usize>,
+    mut loc_list: gimli::LocListIter<EndianSlice<'_, Endian>>,
     dwarf: &Dwarf,
     unit: &Unit,
     regs: &mut nix::libc::user_regs_struct,
     frame_base: Option<u64>,
-    encoding: gimli::Encoding) -> Result<Location, ()> {
-    let mut locations = dwarf.locations(unit, loc_list).map_err(|_| ())?;
-    loop {
-        let entry = locations.next().map_err(|_| ())?.ok_or(())?;
+    encoding: gimli::Encoding
+) -> Result<Location, ()> {
+    while let Some(entry) = loc_list.next().map_err(|_| ())? {
         if (entry.range.begin..entry.range.end).contains(&normal(regs.rip)) {
             let expression = entry.data;
             let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
@@ -1009,10 +1123,11 @@ fn get_loclist_location(
                 gimli::Location::Value {value} => return Ok(Location::Address(value.to_u64(NOMASK).unwrap())),
                 gimli::Location::Address {address} => return Ok(Location::Address(address)),
                 gimli::Location::Register {register} => return Ok(Location::Register(register)),
-                _ => panic!("PLEASE NOT AGAIN")
+                _ => panic!()
             };
         }
-    }
+    };
+    Err(())
 }
 
 fn check_for_main(info: &Function, eh_frame: &EhFrame) -> bool { // function because of language specifications, for now just name matching
@@ -1020,12 +1135,12 @@ fn check_for_main(info: &Function, eh_frame: &EhFrame) -> bool { // function bec
 }
 
 fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<&SourceIndex, ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
-    for i in 0..1000 {
+    for i in 0..100000 {
         match lines.get_line(rip) {
             Some(index) => return Ok(index),
             None => ()
         };
-        rip -= 1;
+        rip = rip.checked_sub(1).map_or(Err(()), |x | Ok(x))?;
     };
     Err(())
 }
@@ -1291,7 +1406,8 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
 }
 
 
-// Assembly
+
+// CODE DISASSEMBLY
 
 use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, NasmFormatter};
 
@@ -1365,7 +1481,8 @@ pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> {
 }
 
 
-// HELPER
+
+// HELPER FUNCTIONS
 
 pub fn normal(rip: u64) -> u64 {
     match EXEC_SHIFT.access().as_ref() {
@@ -1421,5 +1538,12 @@ fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &
         gimli::AttributeValue::DebugInfoRef(value) => value,
         gimli::AttributeValue::UnitRef(value) => value.to_debug_info_offset(unit).unwrap(),
         _ => DebugInfoOffset(0)
+    }
+}
+
+fn loclist_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &Unit) -> gimli::LocationListsOffset {
+    match attr {
+        gimli::AttributeValue::LocationListsRef(value) => value,
+        _ => gimli::LocationListsOffset(0)
     }
 }

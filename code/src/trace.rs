@@ -532,13 +532,15 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         None => pane_task = assembly_task
     }
     match &state.internal.file {
-        None => *task = pane_task,
-        Some(file) => if Some(file.hash_path.clone()) != state.internal.comp_dir {
-            *task = pane_task
-        } else {
+        None => {println!("WHAT");*task = pane_task},
+        Some(file) => {
+        //Some(file) => if Some(file.hash_path.clone()) != state.internal.comp_dir {
+        //    println!("OKNOW");
+        //    *task = pane_task
+        //} else {
             match pane_task {
-                Some(pane) => *task = Some(pane.chain(task_stack())),
-                None => *task = Some(task_stack())
+                Some(pane) => {println!("chained"); *task = Some(pane.chain(task_stack()))},
+                None => {println!("unchained");*task = Some(task_stack())}
             };
         }
     }
