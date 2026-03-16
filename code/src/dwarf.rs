@@ -71,7 +71,8 @@ impl ImplSourceMap for SourceMap {
         if self.contains_key(&hash_dir) {
             let v =self.get_mut(&hash_dir).unwrap();
             for i in 0..v.len() {
-                if v[i] == source_file {
+                //if v[i] == source_file {
+                if v[i].path == source_file.path {
                     return SourceIndex::new(hash_dir, i, line_number);
                 }
             }
@@ -116,6 +117,10 @@ pub trait ImplLineAddresses<'a> {
 
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
+        match EXEC_SHIFT.access().as_ref() {
+            Some(shift) => if *shift > address {return None},
+            None => ()
+        }
         self.get(&normal(address))
     }
 
@@ -705,13 +710,13 @@ pub struct Parameter {
 
 impl Parameter {
     pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) {
-        let vtype = unwind_type(self.vtype, dwarf);
-        let value = vtype.value();
-        match value {
-            Some(value) => res.push((1, format!("{}: {} = {},\n", self.name, vtype.name(dwarf), value))),
-            None => res.push((1, format!("{}: {} = {} {}\n", self.name, vtype.name(dwarf), vtype.name(dwarf), '{')))
-        };
-        if value.is_ok() {return;}
+    //    let vtype = unwind_type(self.vtype, dwarf);
+    //    let value = vtype.value();
+    //    match value {
+    //        Some(value) => res.push((1, format!("{}: {} = {},\n", self.name, vtype.name(dwarf), value))),
+    //        None => res.push((1, format!("{}: {} = {} {}\n", self.name, vtype.name(dwarf), vtype.name(dwarf), '{')))
+    //    };
+    //    if value.is_ok() {return;}
 
     }
 }
@@ -769,7 +774,7 @@ fn unwind (
 
 
     // We need info about the function and all
-    let index = get_next_line(regs.rip, line_addresses); // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
+    let index = get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
     let unit = source_map.get(&index.hash_path).unwrap()[index.index].compile_unit; // our function index is unit organised for faster lookup speed. this is possible thanks to the hashmap, which has constant access time, while searching through ranges is linear access time (in the end, this is MUCH faster, especially with more functions and source files)
     let function = function_index.get_function(normal(regs.rip), unit).unwrap(); // now we get our function offset into the debug_info_section
     let unit_header = dwarf.debug_info.header_from_offset(unit).unwrap();
@@ -1014,14 +1019,15 @@ fn check_for_main(info: &Function, eh_frame: &EhFrame) -> bool { // function bec
     info.debug_info_offset == eh_frame.main
 }
 
-fn get_next_line(mut rip: u64, lines: &LineAddresses) -> &SourceIndex { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
-    loop {
+fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<&SourceIndex, ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
+    for i in 0..1000 {
         match lines.get_line(rip) {
-            Some(index) => return index,
+            Some(index) => return Ok(index),
             None => ()
         };
         rip -= 1;
-    }
+    };
+    Err(())
 }
 
 // Type unwinding - especially for displaying the types

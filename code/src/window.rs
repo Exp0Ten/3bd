@@ -37,6 +37,7 @@ pub struct Internal {
     pub manual: bool,
     pub source_step: Option<trace::Breakpoints>,
     pub file: Option<crate::dwarf::SourceIndex>,
+    pub comp_dir: Option<std::path::PathBuf>,
     pub output: String,
     pub assembly: Option<crate::dwarf::Assembly>,
     pub stack: Option<Vec<(usize, String)>>

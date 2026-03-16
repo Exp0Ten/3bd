@@ -69,8 +69,11 @@ impl ImplBreakpoints for Breakpoints {
         let copy = self.clone();
         let keys = copy.keys();
         for key in keys {
-            let byte = insert_breakpoint(PID.access().unwrap(), anti_normal(*key))?;
-            *self.get_mut(key).unwrap() = byte;
+            let byte = insert_breakpoint(PID.access().unwrap(), anti_normal(*key));
+            match byte {
+                Ok(byte) => *self.get_mut(key).unwrap() = byte,
+                Err(()) => {self.remove(key);}
+            };
         };
         Ok(())
     }
@@ -233,10 +236,12 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             }
             let mut breakpoints = Breakpoints::new();
             let bind = LINES.access();
-            let addresses = bind.as_ref().unwrap().keys();
-            for key in addresses { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
-                let byte = insert_breakpoint(pid, anti_normal(*key)).unwrap();
-                breakpoints.add(*key, byte);
+            for (address, source) in bind.as_ref().unwrap().iter() { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
+                if source.hash_path != *state.internal.comp_dir.as_ref().unwrap() {
+                    //continue;
+                }
+                let byte = insert_breakpoint(pid, anti_normal(*address)).unwrap();
+                breakpoints.add(*address, byte);
             }
             if restart_tracee(pid, None).is_err() {
                 breakpoints.disable_all().unwrap();
@@ -381,7 +386,7 @@ fn panes_preload(state: &mut window::State, task: &mut Option<iced::Task<window:
     let panes = &mut state.layout.panes;
 
     let (comp_dir, main_file) = get_main_file();
-
+    state.internal.comp_dir = Some(PathBuf::from(comp_dir.clone()));
     let mut tasks = Vec::new();
 
     for (id, pane) in panes.iter_mut() {
@@ -408,8 +413,8 @@ fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Tas
         if map.name != path.to_str().unwrap() {
             continue;
         }
-        if map.permissions.x {
-            EXEC_SHIFT.sets(map.range.start - map.offset);
+        if map.offset == 0 {
+            EXEC_SHIFT.sets(map.range.start);
             break;
         }
     };
@@ -488,15 +493,15 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
 
     MAPS.sets(get_process_maps(PROC_PATH.access().as_ref().unwrap()).unwrap());
 
-    state.internal.stopped = true;
     let _ = match &state.internal.source_step {
         Some(breakpoints) => {
             let res = breakpoints.disable_all();
             state.internal.source_step = None;
             res
         },
-        None => BREAKPOINTS.access().as_mut().unwrap().disable_all()
+        None => if !state.internal.stopped {BREAKPOINTS.access().as_mut().unwrap().disable_all()} else {Ok(())}
     };
+    state.internal.stopped = true;
 
 
     let assembly_task = if ui::check_for_assembly(state) { // performance reasons
@@ -526,12 +531,17 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         },
         None => pane_task = assembly_task
     }
-
-    match pane_task {
-        Some(pane) => *task = Some(pane.chain(task_stack())),
-        None => *task = Some(task_stack())
-    };
-
+    match &state.internal.file {
+        None => *task = pane_task,
+        Some(file) => if Some(file.hash_path.clone()) != state.internal.comp_dir {
+            *task = pane_task
+        } else {
+            match pane_task {
+                Some(pane) => *task = Some(pane.chain(task_stack())),
+                None => *task = Some(task_stack())
+            };
+        }
+    }
 }
 
 fn reset() {
@@ -552,6 +562,8 @@ fn reset_file(state: &mut window::State) -> Result<(), ()> {
         }
         reset();
     }
+    state.internal.comp_dir = None;
+    state.internal.file = None;
     state.internal.stopped = false;
     FILE.none();
     DWARF.none();
