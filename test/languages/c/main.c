@@ -1,5 +1,5 @@
 #include "other.h"
-
+#include <stdbool.h>
 
 void hii() {
     int hello = 0;
@@ -54,6 +54,8 @@ int main() {
     g = 0;
     g = 0;
     g = 0;
+
+    bool hi[5] = {true, false, true, true, false};
 
     int a = 10;
     int b = 20;

@@ -73,7 +73,6 @@ impl ImplSourceMap for SourceMap {
             let v =self.get_mut(&hash_dir).unwrap();
             for i in 0..v.len() {
                 if v[i] == source_file {
-                //if v[i].path == source_file.path {
                     return SourceIndex::new(hash_dir, i, line_number);
                 }
             }
@@ -124,7 +123,7 @@ pub trait ImplLineAddresses<'a> {
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
         match EXEC_SHIFT.access().as_ref() {
-            Some(shift) => if *shift > address {println!("HOLD ON {:x} {:x}", shift, address); return None},
+            Some(shift) => if *shift > address {return None},
             None => ()
         }
         self.get(&normal(address))
@@ -166,7 +165,7 @@ pub struct EhFrame<'a> {
 }
 
 impl <'a>EhFrame<'a> {
-    fn eh_frame(&'a self) -> gimli::EhFrame<EndianSlice<'a, Endian>> { // This is very fast function so here it is fine, but elsewhere the borrows would be sad
+    fn eh_frame(&'a self) -> gimli::EhFrame<EndianSlice<'a, Endian>> {
         gimli::EhFrame::new(&self.frame, ENDIAN.access().unwrap())
     }
 
@@ -187,7 +186,7 @@ pub trait SectionsToDwarf {
     fn dwarf(&self, endian: Endian) -> Dwarf;
 }
 
-impl SectionsToDwarf for DwarfSections<'_> {
+impl SectionsToDwarf for DwarfSections<'_> { // we cannot save the the borrow in the globals, so this wrapper saves space
     fn dwarf(&self, endian: Endian) -> Dwarf {
         self.borrow(|section| gimli::EndianSlice::new(Section::as_ref(section), endian))
     }
@@ -236,9 +235,11 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
                 continue;
             }
 
+            // File name fetch
             let file = row.file(header).unwrap();
             let file_name = string(file.path_name(), &dwarf);
 
+            // The directory in the units directory table
             let mut include_dir = {
                 let include_dir = file.directory(header).unwrap();
                 PathBuf::from(
@@ -246,17 +247,18 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
                 )
             };
 
+            // if its relative, then we want to use the compilation directory as base
             let (rel_dir, hash_dir) = if include_dir.is_relative() {
                 include_dir.push(file_name);
                 (include_dir, comp_dir.clone())
             } else {
-                match include_dir.strip_prefix(comp_dir.clone()) {
+                match include_dir.strip_prefix(comp_dir.clone()) { // If it contains the compilation directory, we want to save it with the other files (easier for choosing files written by user, opposed to library includes)
                     Ok(path) => {
                         let mut rel_dir = PathBuf::from(path);
                         rel_dir.push(file_name);
                         (rel_dir, comp_dir.clone())
                     },
-                    Err(_) => (PathBuf::from(file_name), include_dir),
+                    Err(_) => (PathBuf::from(file_name), include_dir), // If not, we just use the the include dir as the hash_path
                 }
             };
 
@@ -266,24 +268,23 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
             };
             let address = row.address();
 
-            let source_file = SourceFile::new(rel_dir, unit.debug_info_offset().unwrap());
+            let source_file = SourceFile::new(rel_dir, unit.debug_info_offset().unwrap()); // we create the new SourceFile
 
-            let source_index = source_files.insert_file(source_file, hash_dir, line);
-            line_addresses.insert(address, source_index);
+            let source_index = source_files.insert_file(source_file, hash_dir, line); // insert it, getting back the index
+            line_addresses.insert(address, source_index); // and finally we insert the SourceIndex (file index with the line info), to the address
         }
     };
 
-    //we iterate over ALL units (for now) and find the line program for all. Later on ill add filters to this as neededs
+    //we iterate over ALL units (for now) and find the line program for all.
     let mut units = dwarf.units();
     while let Some(header) = units.next().unwrap() {
         let unit = dwarf.unit(header).unwrap();
-        //let unit = unit.unit_ref(&dwarf);
         if let Some(line_program) = unit.line_program.clone() {
             parse_line_program(line_program, unit);
         }
     };
 
-    // here we set/overwrite the Internal data
+    // Setting the Globals
     SOURCE.sets(source_files);
     LINES.sets(line_addresses);
 }
@@ -386,7 +387,7 @@ impl FunctionIndex {
 pub fn parse_functions(dwarf: Dwarf) {
     let mut function_index = FunctionIndex::new();
 
-    let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, tho unlikely, also the reason for DebugInfoOffset instead
+    let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, although that is unlikely, also the reason for DebugInfoOffset instead
 
     let mut unit_headers = dwarf.units();
 
@@ -396,8 +397,8 @@ pub fn parse_functions(dwarf: Dwarf) {
         let base_address = unit.low_pc; // for ranges attr
         let mut entries = unit.entries();
 
-        let mut parent_stack: Vec<&str> = Vec::new(); // i could technically always apppend the entire tree yk, but i think just the last parent will be infact enough, but yk TODO, we'll see
-        entries.next_entry().unwrap(); //first entry fetch !!!!!!!!
+        let mut parent_stack: Vec<&str> = Vec::new(); // i could technically always apppend the entire tree (like file::namespace::type ...), but i think just the last parent will be enough
+        entries.next_entry().unwrap();
 
         loop {
             let prev_entry = entries.current(); // we need to do this here for coherent 'continue' logic in this loop
@@ -405,10 +406,12 @@ pub fn parse_functions(dwarf: Dwarf) {
             match prev_entry {
                 Some(entry) => {
                     if entries.next_depth() > entries.depth() { // even if this is a null entry, it will work, as the depth can never be higher after the null (which literally decreases the depth)
-                        parent_stack.push(match entry.attr_value(gimli::DW_AT_name) {
-                            Some(val) => string(val, &dwarf),
-                            None => ""
-                        });
+                        parent_stack.push( // pushing the parent up here (doesnt have to be a subprogram)
+                            match entry.attr_value(gimli::DW_AT_name) {
+                                Some(val) => string(val, &dwarf),
+                                None => ""
+                            }
+                        );
                     };
                 },
                 None => ()
@@ -419,32 +422,31 @@ pub fn parse_functions(dwarf: Dwarf) {
                 },
                 Err(_) => break
             };
-
             let entry = match entries.current() {
                 Some(entry) => entry,
                 None => {parent_stack.pop(); continue}
             };
+            if entry.tag() != gimli::DW_TAG_subprogram {continue;} // skipping over other entries
 
-            if entry.tag() != gimli::DW_TAG_subprogram {continue;}
-
-            if entry.has_attr(gimli::DW_AT_main_subprogram) { // FINDING MAIN
+            if entry.has_attr(gimli::DW_AT_main_subprogram) { // Finding main subprogram
                 let main = entry.offset().to_debug_info_offset(&unit_header);
                 EHFRAME.access().as_mut().unwrap().main = main;
             };
 
-            if entry.attr(gimli::DW_AT_declaration).is_some() {
+            if entry.attr(gimli::DW_AT_declaration).is_some() { // save and skip declarations (no pc for us and such), they will be handled later
                 declarations.insert(entry.offset.to_debug_info_offset(&unit).unwrap(), parent_stack.last().unwrap_or(&""));
                 continue;
-            }; // save and skip declarations (no pc for us and such), they will be handled later
+            };
 
-            let parent: &str = match entry.attr(gimli::DW_AT_specification) {
+            let parent: &str = match entry.attr(gimli::DW_AT_specification) { // if we have a specification, we want to get the parent of the declaration
                 Some(function_declaration) => *declarations.get(&debug_reference(function_declaration.value(), &unit)).unwrap(),
                 None => *parent_stack.last().unwrap_or(&"")
             };
 
-            let applicable_parent = if parent == "" {None} else {Some(parent)}; // apart from the coherency, it saves us 7 bytes per empty parent
+            let applicable_parent = if parent == "" {None} else {Some(parent)}; // apart from the coherency
 
-            if let Some(value) = entry.attr_value(gimli::DW_AT_ranges) {
+            // getting the PC ranges
+            if let Some(value) = entry.attr_value(gimli::DW_AT_ranges) { // if it uses ranges (eg. functions that have inner functions), then we push all of them
                 let range_offset = value.offset_value().unwrap();
                 let mut ranges = dwarf.ranges.ranges(
                     gimli::RangeListsOffset(range_offset),
@@ -452,20 +454,25 @@ pub fn parse_functions(dwarf: Dwarf) {
                     base_address,
                     &dwarf.debug_addr,
                     unit.addr_base
-                ).expect("WTF RANGES");
+                ).expect("Range Parsing Error");
 
-                while let Some(range) = ranges.next().unwrap_or(None) {
-                    function_index.insert_function(range.begin..range.end, entry.offset.to_debug_info_offset(&unit).unwrap(), unit.debug_info_offset().unwrap(), applicable_parent);
+                while let Some(range) = ranges.next().unwrap_or(None) { //iterating through the ranges
+                    function_index.insert_function(
+                        range.begin..range.end,
+                        entry.offset.to_debug_info_offset(&unit).unwrap(),
+                        unit.debug_info_offset().unwrap(),
+                        applicable_parent
+                    );
                 }
 
                 continue;
             }
 
+            // Otherwise, it must contain low_pc and high_pc (if not we skip the function)
             let low_pc = match entry.attr_value(gimli::DW_AT_low_pc) {
                 Some(value) => number(value),
                 None => continue // if we dont have the ranges or the pc definitions, then saving the function only breaks the code
             };
-
             let high_pc = match entry.attr_value(gimli::DW_AT_high_pc) {
                 Some(value) => number(value),
                 None => continue
@@ -473,14 +480,20 @@ pub fn parse_functions(dwarf: Dwarf) {
 
             let function_range = low_pc..low_pc+high_pc;
 
-            function_index.insert_function(function_range, entry.offset.to_debug_info_offset(&unit).unwrap(), unit.debug_info_offset().unwrap(), applicable_parent);
+            function_index.insert_function(
+                function_range,
+                entry.offset.to_debug_info_offset(&unit).unwrap(),
+                unit.debug_info_offset().unwrap(),
+                applicable_parent
+            );
         }
     }
 
+    // Setting the Global
     FUNCTIONS.sets(function_index);
 }
 
-pub fn find_main() -> DebugInfoOffset { // from the symbol, but only if main isnt already found
+pub fn find_main() -> DebugInfoOffset { // from the symbol, but only if main isnt already found (from parsing the functions)
     let mut ehframe_bind = EHFRAME.access();
     let ehframe = ehframe_bind.as_mut().unwrap();
     let symbol = ehframe.object.symbol_by_name("main").unwrap();
@@ -494,6 +507,7 @@ pub fn find_main() -> DebugInfoOffset { // from the symbol, but only if main isn
 
 // STACK UNWINDING
 
+// Struct for returning the context and the row in the FDE
 struct UnwindInfo {
     row: Option<gimli::UnwindTableRow<usize>>,
     ctx: gimli::UnwindContext<usize>
@@ -502,19 +516,19 @@ struct UnwindInfo {
 type GimliEhFrame<'a> = gimli::EhFrame<EndianSlice<'a, Endian>>;
 
 fn get_unwind_for_address(address: u64, eh_frame: (&GimliEhFrame, &EhFrame) ) -> UnwindInfo {
+    // getting the section base (gimli internal logic)
     let bases = gimli::BaseAddresses::default().set_eh_frame(eh_frame.1.section_base);
-
+    // fetching the FDE
     let fde = eh_frame.0.fde_for_address(&bases, address, gimli::EhFrame::cie_from_offset).unwrap();
 
     let mut res = UnwindInfo {
         row: None,
         ctx: gimli::UnwindContext::new()
     };
-
+    // we get the unwind info for the current address
     let unwind_info = fde.unwind_info_for_address(eh_frame.0, &bases, &mut res.ctx, address).unwrap();
 
     res.row = Some(unwind_info.clone());
-
     res
 }
 
@@ -525,23 +539,23 @@ fn get_cfa(unwind: &UnwindInfo, regs: &mut nix::libc::user_regs_struct, eh_frame
         gimli::CfaRule::RegisterAndOffset {
             register,
             offset
-        } => Ok((*match_register(register, regs) as i64 + offset) as u64),
+        } => Ok((*match_register(register, regs) as i64 + offset) as u64), // we get the register and add the offset (casting to avoid overflows)
         gimli::CfaRule::Expression(expression) => {
             let expression = expression.get(eh_frame).unwrap();
             let piece = eval_expression(&expression, regs, None, None, encoding)?[0];
             match piece.location {
                 gimli::Location::Value {value} => Ok(value.to_u64(NOMASK).unwrap()),
-                _ => panic!("i am so tired")
+                _ => panic!("CFA parsing error") // if it would be a register, it would use the upper branch of matchs
             }
         },
     }
 }
 
 fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<(), ()> {
-
+    // register unwind rules
     let rules = unwind.row.as_ref().unwrap().registers();
 
-    for (reg, rule) in rules {
+    for (reg, rule) in rules { // we iterate through the rules
         let value = unwind_register(rule, cfa, regs, eh_frame, encoding);
         match value {
             Ok(value) => *match_register(reg, regs) = value,
@@ -553,6 +567,7 @@ fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_re
 }
 
 fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<u64, ()> {
+    println!("{:?}", register_rule);
     match register_rule {
         gimli::RegisterRule::Offset(addr_offset) => Ok(slice_to_u64(&unwind_memory((cfa as i64 + addr_offset) as u64, 8))),
         gimli::RegisterRule::Expression(expression) => {
@@ -561,7 +576,7 @@ fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &
             Ok(slice_to_u64(&unwind_memory(
                 match piece.location {
                     gimli::Location::Value {value} => value.to_u64(NOMASK).unwrap(),
-                    _ => panic!("MORE EXPLANATIONS")
+                    _ => panic!("Register Expression Error")
                 }
             , 8))
         )},
@@ -571,17 +586,17 @@ fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &
             let piece = eval_expression(&expression, regs, Some(cfa), None, encoding)?[0];
             Ok(match piece.location {
                 gimli::Location::Value {value} => value.to_u64(NOMASK).unwrap(),
-                _ => panic!("EXPLAIN YOURSELF PEASANT")
+                _ => panic!("Register Expression Error")
             })
         },
         gimli::RegisterRule::Register(register) => Ok(*match_register(register, regs)),
         gimli::RegisterRule::Constant(value) => Ok(*value),
         gimli::RegisterRule::SameValue => Err(()),
-        _ => unimplemented!()
+        _ => unimplemented!("Unimplemented register unwind rule")
     }
 }
 
-fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_regs_struct) -> &'a mut u64 {
+fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_regs_struct) -> &'a mut u64 { //we match the gimli registers to the user regs
     match *register {
         gimli::X86_64::RAX => &mut regs.rax,
         gimli::X86_64::RBX => &mut regs.rbx,
@@ -600,7 +615,7 @@ fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_
         gimli::X86_64::R14 => &mut regs.r14,
         gimli::X86_64::R15 => &mut regs.r15,
         gimli::X86_64::RA =>  &mut regs.rip,
-        _ => unimplemented!()
+        _ => unimplemented!("Unimplemented Register Match")
     }
 }
 
@@ -619,6 +634,7 @@ fn eval_expression<'a>(
 
     let mut result = evaluation.evaluate().map_err(|_| ())?;
     loop {
+        println!("{:?}", result);
         match result {
             gimli::EvaluationResult::Complete => break,
             gimli::EvaluationResult::RequiresMemory { address, size, .. } => {
@@ -634,15 +650,14 @@ fn eval_expression<'a>(
             gimli::EvaluationResult::RequiresCallFrameCfa => {
                 result = evaluation.resume_with_call_frame_cfa(cfa.ok_or(())?).map_err(|_| ())?;
             }
-            _ => unimplemented!("DAMN WHAT")
+            _ => unimplemented!("Unimplemented Expression Evaluation")
         }
     }
-    let result = evaluation.result();
-    Ok(result)
+    Ok(evaluation.result())
 }
 
 fn slice_to_u64(slice: &[u8]) -> u64 {
-    let bytes: [u8; 8] = slice.try_into().unwrap(); // please just dont pass down a wrong size or that oki
+    let bytes: [u8; 8] = slice.try_into().unwrap(); // I know this could panic, but we shouldnt be fetching more than 8 bytes
     let endian: Endian = ENDIAN.access().unwrap();
 
 
@@ -660,6 +675,26 @@ impl CallStack {
     fn new() -> Self {
         CallStack(Vec::new())
     }
+
+    pub fn stack_lines(stack: Result<Self, ()>) -> Result<Vec<(usize, String)>, ()> {
+        if stack.is_err() {
+            return Err(());
+        }
+
+        let functions_bind = FUNCTIONS.access();
+        let dwarf_bind = DWARF.access();
+        let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
+
+        let mut stack = stack.unwrap().0;
+        stack.reverse();
+
+        let mut result = Vec::new();
+
+        for (call, function) in stack.iter().enumerate() {
+            function.lines(call, &mut result, &dwarf, functions_bind.as_ref().unwrap());
+        };
+        Ok(result)
+    }
 }
 
 type Type = DebugInfoOffset;
@@ -671,6 +706,46 @@ pub struct Function {
     pub return_type: Option<Type>,
     pub debug_info_offset: Option<DebugInfoOffset>,
 }
+
+impl Function {
+    pub fn lines(&self, call: usize, res: &mut Vec<(usize, String)>, dwarf: &Dwarf, functions: &FunctionIndex) {
+        let parent = match functions.subtype_parent.get(&self.debug_info_offset.unwrap()) {
+            Some(parent) => format!("{parent}::"),
+            None => "".to_string()
+        };
+        let return_type = match self.return_type {
+            Some(vtype) => format!(" -> {}", unwind_type(vtype, &dwarf).name(&dwarf)),
+            None => "".to_string()
+        };
+
+        if let Some(parameters) = &self.parameters {
+            res.push((0, format!("{call}: {}{}(", parent, self.name)));
+            for param in parameters {
+                let mut temp_buf = Vec::new();
+                let param_value = param.lines(&mut temp_buf, &dwarf);
+
+                res.push((2, param_value));
+                res.append(&mut temp_buf);
+                res.last_mut().unwrap().1.push(',');
+            }
+            res.last_mut().unwrap().1.pop();
+            res.push((1, format!("){}", return_type,))); // the depth 1 is rendered as depth 0, but gets hidden when the call is collapsed
+        } else {
+            res.push((0, format!("{call}: {}{}(){}", parent, self.name, return_type,)));
+        };
+
+        if let Some(variables) = &self.variables {
+            for var in variables {
+            let mut temp_buf = Vec::new();
+            let var_value = var.lines(&mut temp_buf, &dwarf);
+
+            res.push((2, var_value));
+            res.append(&mut temp_buf);
+            res.last_mut().unwrap().1.push(';');
+        }}
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
@@ -680,8 +755,19 @@ pub struct Variable {
 }
 
 impl Variable {
-    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) {
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) -> String {
+        let vtype = unwind_type(self.vtype, dwarf);
 
+        if let Some(location) = self.location.clone() {
+            let value = vtype.value(location, res, 2, dwarf);
+            return format!("{} {} = {}", vtype.name(dwarf), self.name, value);
+        };
+        if let Some(constant) = self.constant {
+            let value = vtype.const_value(constant);
+            return format!("{} {} = {}", vtype.name(dwarf), self.name, value);
+        };
+
+        format!("{} {}", vtype.name(dwarf), self.name)
     }
 }
 
@@ -693,15 +779,10 @@ pub struct Parameter {
 }
 
 impl Parameter {
-    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) {
-    //    let vtype = unwind_type(self.vtype, dwarf);
-    //    let value = vtype.value();
-    //    match value {
-    //        Some(value) => res.push((1, format!("{}: {} = {},\n", self.name, vtype.name(dwarf), value))),
-    //        None => res.push((1, format!("{}: {} = {} {}\n", self.name, vtype.name(dwarf), vtype.name(dwarf), '{')))
-    //    };
-    //    if value.is_ok() {return;}
-
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: &Dwarf) -> String {
+        let vtype = unwind_type(self.vtype, dwarf);
+        let value = vtype.value(self.location.clone(), res, 2, dwarf);
+        format!("{} {} = {}", vtype.name(dwarf), self.name, value)
     }
 }
 
@@ -750,7 +831,6 @@ fn unwind (
     bindings: Bindings,
     regs: &mut nix::libc::user_regs_struct
 ) -> Result<bool, ()> {
-    // parsed global DWARF INFO // make wrapper functions for these data
 
     let eh_frame = bindings.0;
     let gimli_eh_frame = eh_frame.eh_frame();
@@ -761,7 +841,9 @@ fn unwind (
 
 
     // We need info about the function and all
-    let index = get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
+    let (index, rip)= get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
+    //regs.rip = rip;
+    println!("{:?}", index);
     print!("a");
     let unit = source_map.get(&index.hash_path).unwrap()[index.index].compile_unit; // our function index is unit organised for faster lookup speed. this is possible thanks to the hashmap, which has constant access time, while searching through ranges is linear access time (in the end, this is MUCH faster, especially with more functions and source files)
     print!("b");
@@ -792,8 +874,6 @@ fn unwind (
     print!("m");
     let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
 
-
-
     print!("o");
     let frame_base = if frame_attribute.is_some() {
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
@@ -801,11 +881,13 @@ fn unwind (
         match frame_base.location {
             gimli::Location::Address { address } => Some(address),
             gimli::Location::Register {register} => Some(*match_register(&register, regs)),
-            _ => panic!("huh")
+            _ => panic!("Unknown FrameBase Expression")
         }
     } else {
         None
     };
+
+    println!("{}\n {:?}",cfa, frame_base);
 
     print!("p");
     //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
@@ -813,6 +895,7 @@ fn unwind (
 
     print!("n");
     unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
+
 
     print!("q");
     if function_info.variables.as_ref().unwrap().len() == 0 { //space opt
@@ -947,7 +1030,7 @@ fn extract_var<'a>(
                     }
                 } else {
                     if let Some(loclist) = dwarf.attr_locations(unit, attr).map_err(|_| ())? {
-                        get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding).map_or(None, |loc| Some(loc))
+                        get_loclist_location(loclist, regs, frame_base, encoding).map_or(None, |loc| Some(loc))
                     } else {
                         None
                     }
@@ -956,9 +1039,9 @@ fn extract_var<'a>(
             None => None
         };
         let constant = match entry.attr(gimli::DW_AT_const_value) {
-            Some(attr) => match attr.udata_value() {
+            Some(attr) => match attr.udata_value() { // constant values only work for base_types right now
                 Some(val) => Some(val),
-                None => {println!("WTF CONSTANT"); None} // i want to know if it does some weird shit
+                None => {println!("WTF CONSTANT"); None}
             },
             None => None
         };
@@ -988,8 +1071,6 @@ fn extract_var<'a>(
 
 fn get_loclist_location(
     mut loc_list: gimli::LocListIter<EndianSlice<'_, Endian>>,
-    dwarf: &Dwarf,
-    unit: &Unit,
     regs: &mut nix::libc::user_regs_struct,
     frame_base: Option<u64>,
     encoding: gimli::Encoding
@@ -999,7 +1080,7 @@ fn get_loclist_location(
             let expression = entry.data;
             let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
             match piece.location {
-                gimli::Location::Value {value} => return Ok(Location::Address(value.to_u64(NOMASK).unwrap())),
+                gimli::Location::Value {value} => return Ok(Location::Address(value.to_u64(NOMASK).unwrap()+frame_base.unwrap())),
                 gimli::Location::Address {address} => return Ok(Location::Address(address)),
                 gimli::Location::Register {register} => return Ok(Location::Register(register)),
                 _ => panic!()
@@ -1013,10 +1094,11 @@ fn check_for_main(info: &Function, eh_frame: &EhFrame) -> bool { // function bec
     info.debug_info_offset == eh_frame.main
 }
 
-fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<&SourceIndex, ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
-    for i in 0..100000 {
+fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<(&SourceIndex, u64), ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
+    for _ in 0..100000 {
+        println!("{}", rip);
         match lines.get_line(rip) {
-            Some(index) => return Ok(index),
+            Some(index) => return Ok((index, rip)), // We need to return the updated rip, otherwise the framebase and such will be incorrect
             None => ()
         };
         rip = rip.checked_sub(1).map_or(Err(()), |x | Ok(x))?;
@@ -1025,7 +1107,7 @@ fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<&SourceIndex, ()
 }
 
 // Type unwinding - especially for displaying the types
-pub enum TypeDisplay<'a> {
+enum TypeDisplay<'a> {
     Base(BaseType<'a>),
     Pointer(PointerType<'a>),
     Modifier(ModifierType<'a>),
@@ -1036,15 +1118,70 @@ pub enum TypeDisplay<'a> {
 }
 
 impl <'a> TypeDisplay<'a> {
-    pub fn name(&self, dwarf: &'a Dwarf) -> String {
+    fn name(&self, dwarf: &'a Dwarf) -> String {
         match self {
            Self::Base(base) => base.name.unwrap_or("").to_string(),
-           Self::Pointer(pointer) => format!("&{}", pointer.name.unwrap_or("").to_string()),
-           Self::Modifier(modifier) => format!("{} {}", modifier.modifier, unwind_type(modifier.vtype, dwarf).name(dwarf)),
-           Self::Array(array) => array.name.to_string(),
+           Self::Pointer(pointer) => pointer.name(dwarf),
+           Self::Modifier(modifier) => format!("{} {}", modifier.name(), unwind_type(modifier.vtype, dwarf).name(dwarf)), // will recurse name
+           Self::Array(array) => array.name(dwarf),
            Self::Struct(str) => str.name.unwrap_or("").to_string(),
-           Self::Enum(en) => en.name.to_string(),
+           Self::Enum(enume) => enume.name.to_string(),
            Self::Def(typedef) => typedef.name.to_string(),
+        }
+    }
+
+    fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
+        match self {
+            Self::Base(base) => base.value(location),
+            Self::Pointer(pointer) => pointer.value(location),
+            Self::Modifier(modifier) => modifier.value(location, res, depth, dwarf),
+            Self::Array(array) => array.value(location, res, depth, dwarf),
+            Self::Struct(str) => str.value(location, res, depth, dwarf),
+            Self::Enum(enume) => enume.value(location, dwarf),
+            Self::Def(typedef) => typedef.value(location, res, depth, dwarf)
+        }
+    }
+
+    fn const_value(&self, constant: u64) -> String {
+        match self {
+            Self::Base(base) => {
+                let slice = constant.to_le_bytes();
+                base.constant_value(&slice, gimli::RunTimeEndian::Little) // because to_BE_bytes()
+            },
+            Self::Pointer(pointer) => {
+                pointer.display(constant)
+            }
+            _ => "?".to_string()
+        }
+    }
+
+    fn size(&self, dwarf: &Dwarf) -> BitByteSize {
+        match self {
+            Self::Base(base) => base.size,
+            Self::Pointer(pointer) => {
+                unwind_type(pointer.vtype, dwarf).size(dwarf)
+            },
+            Self::Modifier(modifier) => {
+                unwind_type(modifier.vtype, dwarf).size(dwarf)
+            }
+            Self::Array(array) => match array.size {
+                Some(size) => size,
+                None => {
+                    unwind_type(array.vtype, dwarf).size(dwarf)
+                }
+            },
+            Self::Struct(str) => str.size,
+            Self::Enum(enume) => {
+                match enume.size {
+                    Some(size) => size,
+                    None => {
+                        unwind_type(enume.vtype.unwrap(), dwarf).size(dwarf)
+                    }
+                }
+            }
+            Self::Def(typedef) => {
+                unwind_type(typedef.vtype.unwrap(), dwarf).size(dwarf)
+            }
         }
     }
 }
@@ -1056,15 +1193,132 @@ pub struct BaseType<'a> {
     pub endian: Option<Endian>
 }
 
+impl <'a>BaseType<'a> {
+    fn constant_value(&self, slice: &[u8], endian: Endian) -> String {
+        self.encoding(slice, endian)
+    }
+
+    fn value(&self, location: Location) -> String {
+        let endian = self.endian.unwrap_or(*ENDIAN.access().as_ref().unwrap());
+        if let Ok(slice) = location_memory(location, self.size, endian) {
+            self.encoding(&slice, endian)
+        } else {
+            "?".to_string()
+        }
+    }
+
+    fn encoding(&self, slice: &[u8], endian: Endian) -> String {
+        let byte_size = slice.len();
+        match self.encoding {
+            gimli::DW_ATE_unsigned => {
+                match byte_size {
+                    1    => slice[0].to_string(),
+                    2    => u16::from_bytes(slice, endian).to_string(),
+                    3..4 => u32::from_bytes(slice, endian).to_string(),
+                    4..8 => u64::from_bytes(slice, endian).to_string(),
+                    _    => u128::from_bytes(slice, endian).to_string()
+                }
+            },
+            gimli::DW_ATE_unsigned_char => {
+                if slice[0].is_ascii_graphic() {
+                    format!("'{}'", slice[0] as char)
+                } else {
+                    format!("{:2x}h", slice[0])
+                }
+            }
+            gimli::DW_ATE_signed => {
+                match byte_size {
+                    1    => (slice[0] as i32).to_string(),
+                    2    => i16::from_bytes(slice, endian).to_string(),
+                    3..4 => i32::from_bytes(slice, endian).to_string(),
+                    4..8 => i64::from_bytes(slice, endian).to_string(),
+                    _    => i128::from_bytes(slice, endian).to_string()
+                }
+            },
+            gimli::DW_ATE_signed_char => {
+                format!("{}", slice[0] as i8)
+            }
+            gimli::DW_ATE_ASCII => {
+                if slice[0].is_ascii_graphic() {
+                    format!("'{}'", slice[0] as char)
+                } else {
+                    format!("{:2x}h", slice[0])
+                }
+            }
+            gimli::DW_ATE_boolean => {
+                if slice[0] != 0 {
+                    "True".to_string()
+                } else {
+                    "False".to_string()
+                }
+            },
+            gimli::DW_ATE_UTF => {
+                let mut buf = String::new();
+                slice.iter().for_each(|byte| buf.push_str(&format!("{:X}", byte)));
+                buf.push('h');
+                buf
+            }
+            gimli::DW_ATE_address => {
+                format!("0x{:x}", u64::from_bytes(slice, endian))
+            }
+            _ => String::from("?")
+        }
+    }
+}
+
 struct PointerType <'a> {
     name: Option<&'a str>,
     vtype: Type,
+}
+
+impl <'a>PointerType<'a> {
+    fn name(&self, dwarf: &Dwarf) -> String {
+        match self.name {
+            Some(name) => name.to_string(),
+            None => format!("*{}", unwind_type(self.vtype, dwarf).name(dwarf))
+        }
+    }
+
+    fn display(&self, value: u64) -> String {
+        format!("<0x{:x}>", value)
+    }
+
+    fn value(&self, location: Location) -> String {
+        let endian = ENDIAN.access().unwrap();
+        if let Ok(slice) = location_memory(location, BitByteSize::Byte(8), endian) {
+            let value = <u64>::from_bytes(&slice, endian);
+            self.display(value)
+        } else {
+            "?".to_string()
+        }
+    }
 }
 
 struct ModifierType<'a> {
     name: Option<&'a str>,
     vtype: Type,
     modifier: Modifier
+}
+
+impl <'a>ModifierType<'a> {
+    fn name(&self) -> String {
+        match self.name {
+            Some(name) => name.to_string(),
+            None => self.modifier.to_string()
+        }
+    }
+
+    fn value(
+        &self,
+        location: Location,
+        res: &mut Vec<(usize, String)>,
+        depth: usize,
+        dwarf: &Dwarf
+    ) -> String {
+        let next = unwind_type(self.vtype, dwarf)
+        .value(location, res, depth, dwarf);
+        format!("{} {}", self.name(), next)
+    }
 }
 
 enum Modifier {
@@ -1088,15 +1342,142 @@ impl std::fmt::Display for Modifier {
 }
 
 struct ArrayType<'a> {
-    name: &'a str,
+    name: Option<&'a str>,
     vtype: Type,
-    size: BitByteSize
+    size: Option<BitByteSize>,
+    count: Option<u64>
 }
+
+impl <'a>ArrayType<'a> {
+    fn name(&self, dwarf: &Dwarf) -> String {
+        match self.name {
+            Some(name) => name.to_string(),
+            None => format!("[{}]", unwind_type(self.vtype, dwarf).name(dwarf))
+        }
+    }
+
+    fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
+        if self.size.is_none() && self.count.is_none() {
+            if let Some(name) = self.name {
+                return format!("{} []", name);
+            } else {
+                return "[]".to_string();
+            }
+        };
+
+        let vtype = unwind_type(self.vtype, dwarf);
+        let address = match location {
+            Location::Address(address) => address,
+            Location::Register(_) => if let Some(name) = self.name {
+                return format!("{} [?]", name);
+            } else {
+                return "[?]".to_string();
+            }
+        };
+
+        let element_size = match vtype.size(dwarf) {
+            BitByteSize::Byte(size) => size,
+            BitByteSize::Bit(_) => if let Some(name) = self.name {
+                return format!("{} [?]", name);
+            } else {
+                return "[?]".to_string();
+            }
+        };
+
+        let mut new_buf = Vec::new();
+
+        let count = if self.count.is_some() {
+            self.count.unwrap()
+        } else {
+            let array_size = match self.size.unwrap() {
+                BitByteSize::Byte(size) => size,
+                BitByteSize::Bit(_) => if let Some(name) = self.name {
+                    return format!("{} [?]", name);
+                } else {
+                    return "[?]".to_string();
+                }
+            };
+            array_size/element_size
+        };
+
+        for index in 0..count {
+            let mut temp_buf = Vec::new();
+            let element = vtype.value(
+                Location::Address(address+(index*element_size)),
+                &mut temp_buf,
+                depth+1,
+                dwarf
+            );
+            new_buf.push((depth+1, element));
+            new_buf.append(&mut temp_buf);
+            new_buf.last_mut().unwrap().1.push(',');
+        }
+
+        res.append(&mut new_buf);
+        if let Some(last) = res.last_mut(){
+            last.1.pop();
+        }
+        res.push((depth, "]".to_string()));
+        if let Some(name) = self.name {
+            format!("{} [", name)
+        } else {
+            "[".to_string()
+        }
+    }
+}
+
 
 struct StructType<'a> {
     name: Option<&'a str>,
     size: BitByteSize,
     members: Vec<Member<'a>>
+}
+
+impl <'a>StructType<'a> {
+    fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
+        if self.size.is_zero() {
+            if let Some(name) = self.name {
+                return format!("{} {}", name, "{}");
+            } else {
+                return "{}".to_string();
+            }
+        };
+
+        let address = match location {
+            Location::Address(address) => address,
+            Location::Register(_) => if let Some(name) = self.name {
+                return format!("{} {}", name, "{?}");
+            } else {
+                return "{?}".to_string();
+            }
+        };
+
+        let mut new_buf = Vec::new();
+
+        for member in &self.members {
+            let mut temp_buf = Vec::new();
+            let vtype = unwind_type(member.vtype, dwarf);
+            let member_value = vtype.value(
+                Location::Address(address+member.offset),
+                &mut temp_buf,
+                depth+1,
+                dwarf
+            );
+
+            new_buf.push((depth+1, format!("{} {}: {}", vtype.name(dwarf), member.name, member_value)));
+            new_buf.append(&mut temp_buf);
+            new_buf.last_mut().unwrap().1.push(',');
+        };
+
+        res.append(&mut new_buf);
+        res.last_mut().unwrap().1.pop();
+        res.push((depth, "}".to_string()));
+        if let Some(name) = self.name {
+            format!("{} {}", name, '{')
+        } else {
+            "{".to_string()
+        }
+    }
 }
 
 struct Member<'a> {
@@ -1112,14 +1493,54 @@ struct EnumType<'a> {
     enumerators: Vec<Enumerator<'a>>
 }
 
+impl <'a>EnumType<'a> {
+    fn value(&self, location: Location, dwarf: &Dwarf) -> String {
+        let endian = ENDIAN.access().unwrap();
+        let size = match self.size {
+            Some(size) => size,
+            None => unwind_type(self.vtype.unwrap(), dwarf).size(dwarf)
+        };
+        if let Ok(slice) = location_memory(location, size, endian) {
+            let normal = match slice.len() {
+                1    => u8::from_bytes(&slice, endian) as u64,
+                2    => u16::from_bytes(&slice, endian) as u64,
+                3..4 => u32::from_bytes(&slice, endian) as u64 ,
+                _ => u64::from_bytes(&slice, endian) as u64,
+            };
+
+            for member in &self.enumerators {
+                let value = member.constant;
+                if value == normal {
+                    return format!("{}::{}", self.name, member.name);
+                }
+
+            };
+            format!("{}::?", self.name)
+        } else {
+            format!("{}::?", self.name)
+        }
+    }
+}
+
+#[derive(Debug)]
 struct Enumerator<'a> {
     name: &'a str,
     constant: u64
 }
 
+#[derive(Clone, Copy)]
 pub enum BitByteSize {
     Bit(u64),
     Byte(u64),
+}
+
+impl BitByteSize {
+    fn is_zero(&self) -> bool {
+        match self {
+            Self::Bit(0)|Self::Byte(0) => true,
+            _ => false
+        }
+    }
 }
 
 struct TypeDef<'a> {
@@ -1127,13 +1548,27 @@ struct TypeDef<'a> {
     vtype: Option<Type>
 }
 
-pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a> {
+impl <'a>TypeDef<'a> { // when we define a type, we dont want to display the types it was composed of, so we display only the last one as that is our value (or brackets when its a struct or an array)
+    fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
+        if let Some(vtype) = self.vtype {
+            let next = unwind_type(vtype, dwarf);
+            let text = next.value(location, res, depth, dwarf);
+            let last = text.split_ascii_whitespace().last();
+            format!("{} {}", self.name, last.unwrap_or(""))
+        } else {
+            self.name.to_string()
+        }
+    }
+}
+
+
+fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a> {
     let type_entry = get_unit_entry_offset(debug_info_offset, dwarf);
     let unit = dwarf.unit(dwarf.unit_header(type_entry.1).unwrap()).unwrap();
     let entry = unit.entry(type_entry.0).unwrap();
 
     let name = match entry.attr_value(gimli::DW_AT_name) {
-        Some(value) => Some(value.string_value(&dwarf.debug_str).unwrap().to_string().unwrap()),
+        Some(value) => Some(string(value, dwarf)),
         None => None
     };
 
@@ -1141,8 +1576,8 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
         gimli::DW_TAG_base_type => {
             let encoding = encoding(entry.attr_value(gimli::DW_AT_encoding).unwrap());
             let size = match entry.attr_value(gimli::DW_AT_byte_size) {
-                Some(value) => BitByteSize::Byte(value.udata_value().unwrap()),
-                None => BitByteSize::Bit(entry.attr_value(gimli::DW_AT_bit_size).unwrap().udata_value().unwrap())
+                Some(value) => BitByteSize::Byte(number(value)),
+                None => BitByteSize::Bit(number(entry.attr_value(gimli::DW_AT_bit_size).unwrap()))
             };
             let endian: Option<gimli::RunTimeEndian> = match entry.attr_value(gimli::DW_AT_endianity) {
                 Some(value) => {
@@ -1162,7 +1597,7 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
         },
         gimli::DW_TAG_pointer_type
         | gimli::DW_TAG_reference_type => {
-            let vtype = DebugInfoOffset(entry.attr_value(gimli::DW_AT_type).unwrap().offset_value().unwrap());
+            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), &unit);
             TypeDisplay::Pointer(PointerType {
                 name,
                 vtype
@@ -1173,7 +1608,7 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
         | gimli::DW_TAG_immutable_type
         | gimli::DW_TAG_shared_type
         | gimli::DW_TAG_volatile_type => {
-            let vtype = DebugInfoOffset(entry.attr_value(gimli::DW_AT_type).unwrap().offset_value().unwrap());
+            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), &unit);
             TypeDisplay::Modifier(ModifierType {
                 name,
                 vtype,
@@ -1188,15 +1623,50 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
             })
         },
         gimli::DW_TAG_array_type => {
-            let vtype = DebugInfoOffset(entry.attr_value(gimli::DW_AT_type).unwrap().offset_value().unwrap());
-            let size = match entry.attr_value(gimli::DW_AT_byte_size) {
-                Some(value) => BitByteSize::Byte(value.udata_value().unwrap()),
-                None => BitByteSize::Bit(entry.attr_value(gimli::DW_AT_bit_size).unwrap().udata_value().unwrap())
+            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), &unit);
+            let size = match entry.attr_value(gimli::DW_AT_bit_size) {
+                Some(value) => Some(BitByteSize::Bit(number(value))),
+                None => None
             };
+            let size = match entry.attr_value(gimli::DW_AT_byte_size) {
+                Some(value) => Some(BitByteSize::Byte(number(value))),
+                None => size
+            };
+
+            let mut cursor = unit.entries_at_offset(type_entry.0).unwrap();
+            cursor.next_entry().unwrap();
+
+            let count = match cursor.next_entry() {
+                Ok(true) => {
+                    let entry = cursor.current().unwrap();
+                    if let Some(upper) = entry.attr_value(gimli::DW_AT_upper_bound) {
+                        println!("noo");
+                        let upper = number(upper);
+                        if let Some(lower) =  entry.attr_value(gimli::DW_AT_lower_bound) {
+                            Some(upper-number(lower)+1)
+                        } else {
+                            Some(upper+1)
+                        }
+                    } else {
+                        println!("ohhh");
+                        if let Some(count) = entry.attr_value(gimli::DW_AT_count) {
+                            println!("{:?}", count);
+                            Some(number(count))
+                        } else {
+                            None
+                        }
+                    }
+                },
+                _ => None
+            };
+
+            println!("{:?}", count);
+
             TypeDisplay::Array(ArrayType {
-                name: name.unwrap(),
+                name: name,
                 vtype,
-                size
+                size,
+                count
             })
         },
         gimli::DW_TAG_structure_type
@@ -1208,19 +1678,38 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
             };
             let mut members: Vec<Member> = Vec::new();
             let mut entries = unit.entries_at_offset(type_entry.0).unwrap();
-            entries.next_entry().unwrap(); // Stepping into the children
+            entries.next_entry().unwrap();
+
+            let mut first = true;
+
             loop {
-                let current = match entries.next_sibling().unwrap() { // iter only over the siblings
-                    Some(entry) => entry,
-                    None => break
+                let current = if first {
+                    first = false;
+                    if entries.next_entry().unwrap() {
+                        match entries.current() {
+                            Some(entry) => entry,
+                            None => break
+                        }
+                    } else {
+                        break;
+                    }
+                } else {
+                    match entries.next_sibling().unwrap() { // iter only over the siblings
+                        Some(entry) => entry,
+                        None => break
+                    }
                 };
 
                 if current.tag() != gimli::DW_TAG_member {
                     continue;
                 }
-                let name = entry.attr_value(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap();
-                let vtype = DebugInfoOffset(entry.attr_value(gimli::DW_AT_type).unwrap().offset_value().unwrap());
-                let offset = entry.attr_value(gimli::DW_AT_data_member_location).unwrap().udata_value().unwrap();
+                let name = string(current.attr_value(gimli::DW_AT_name).unwrap(), dwarf);
+                let vtype = debug_reference(current.attr_value(gimli::DW_AT_type).unwrap(), &unit);
+                let offset = if let Some(attr) = current.attr_value(gimli::DW_AT_data_member_location) { // i know im not handling the data_bit_offset, but bit structures seem a little over the top
+                    number(attr)
+                } else {
+                    0
+                };
                 members.push(Member {
                     name,
                     vtype,
@@ -1235,29 +1724,45 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
         },
         gimli::DW_TAG_enumeration_type => {
             let size = match entry.attr_value(gimli::DW_AT_byte_size) {
-                Some(value) => Some(BitByteSize::Byte(value.udata_value().unwrap())),
+                Some(value) => Some(BitByteSize::Byte(number(value))),
                 None => match entry.attr_value(gimli::DW_AT_bit_size) {
-                    Some(value) => Some(BitByteSize::Bit(value.udata_value().unwrap())),
+                    Some(value) => Some(BitByteSize::Bit(number(value))),
                     None => None
             }};
             let vtype = match entry.attr_value(gimli::DW_AT_type) {
-                Some(value) => Some(DebugInfoOffset(value.udata_value().unwrap() as usize)),
+                Some(value) => Some(DebugInfoOffset(number(value) as usize)),
                 None => None
             };
             let mut enumerators: Vec<Enumerator> = Vec::new();
             let mut entries = unit.entries_at_offset(type_entry.0).unwrap();
             entries.next_entry().unwrap(); // Stepping into the children
+            let mut first = true;
+            println!("YOOO");
             loop {
-                let current = match entries.next_sibling().unwrap() { // iter only over the siblings
-                    Some(entry) => entry,
-                    None => break
+                println!("DAMN");
+
+                let current = if first {
+                    first = false;
+                    if entries.next_entry().unwrap() {
+                        match entries.current() {
+                            Some(entry) => entry,
+                            None => break
+                        }
+                    } else {
+                        break;
+                    }
+                } else {
+                    match entries.next_sibling().unwrap() { // iter only over the siblings
+                        Some(entry) => entry,
+                        None => break
+                    }
                 };
 
-                if current.tag() != gimli::DW_TAG_member {
+                if current.tag() != gimli::DW_TAG_enumerator {
                     continue;
                 }
-                let name = entry.attr_value(gimli::DW_AT_name).unwrap().string_value(&dwarf.debug_str).unwrap().to_string().unwrap();
-                let constant = entry.attr_value(gimli::DW_AT_const_value).unwrap().udata_value().unwrap();
+                let name = string(current.attr_value(gimli::DW_AT_name).unwrap(), dwarf);
+                let constant = number(current.attr_value(gimli::DW_AT_const_value).unwrap());
                 enumerators.push(Enumerator {
                     name,
                     constant
@@ -1272,7 +1777,7 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
         },
         gimli::DW_TAG_typedef => {
             let vtype = match entry.attr_value(gimli::DW_AT_type) {
-                Some(value) => Some(DebugInfoOffset(value.udata_value().unwrap() as usize)),
+                Some(value) => Some(debug_reference(value, &unit)),
                 None => None
             };
             TypeDisplay::Def(TypeDef{
@@ -1280,10 +1785,51 @@ pub fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay
                 vtype
             })
         },
-        _ => panic!()
+        gimli::DW_TAG_packed_type
+        | gimli::DW_TAG_restrict_type 
+        | gimli::DW_TAG_rvalue_reference_type => { // fallback for unused modifier types
+            let vtype = match entry.attr_value(gimli::DW_AT_type) {
+                Some(value) => Some(debug_reference(value, &unit)),
+                None => None
+            };
+            TypeDisplay::Def(TypeDef{
+                name: "",
+                vtype
+            })
+        },
+        _ => TypeDisplay::Def(TypeDef{ // Real FallBack for any unimplemented type
+                name: "",
+                vtype: None
+        })
     }
 }
 
+fn location_memory(location: Location, size: BitByteSize, endian: Endian) -> Result<Vec<u8>, ()> {
+    let read_size = match size {
+        BitByteSize::Byte(byte) => byte,
+        BitByteSize::Bit(bit) => bit.div_ceil(8)
+    };
+    let res = match location {
+        Location::Register(register) => {
+            let mut bind = REGISTERS.access();
+            let number = match_register(&register, bind.as_mut().unwrap());
+            let data = match endian {
+                gimli::RunTimeEndian::Big => number.to_be_bytes(),
+                gimli::RunTimeEndian::Little => number.to_le_bytes()
+            };
+            Vec::from(&data[0..read_size as usize])
+        }
+        Location::Address(address) => {
+            let slice = trace::read_memory(address, read_size as usize).expect("Memory Read Exception");
+            slice
+        }
+    };
+    if let BitByteSize::Bit(_) = size { // i have not seen any lang use it, even when compiled to optimize size (for now bit size is unimplemented but wont panic)
+        Err(())
+    } else {
+        Ok(res)
+    }
+}
 
 
 // CODE DISASSEMBLY
@@ -1420,6 +1966,10 @@ fn number(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>) -> u64 {
     match attr {
         gimli::AttributeValue::Addr(val) => val,
         gimli::AttributeValue::Udata(val) => val,
+        gimli::AttributeValue::Data1(data) => data as u64,
+        gimli::AttributeValue::Data2(data) => data as u64,
+        gimli::AttributeValue::Data4(data) => data as u64,
+        gimli::AttributeValue::Data8(data) => data as u64,
         _ => 0
     }
 }
@@ -1439,9 +1989,40 @@ fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &
     }
 }
 
-fn loclist_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &Unit) -> gimli::LocationListsOffset {
-    match attr {
-        gimli::AttributeValue::LocationListsRef(value) => value,
-        _ => gimli::LocationListsOffset(0)
-    }
+trait FromBytes<const N: usize> {
+    fn from_bytes(bytes: &[u8], endian: Endian) -> Self;
+    fn fixed(bytes: &[u8], endian: Endian) -> [u8; N];
 }
+
+macro_rules! impl_from_bytes {
+    ($($t:ty), *) => {
+        $(
+            impl FromBytes<{std::mem::size_of::<$t>()}> for $t {
+                fn from_bytes(bytes: &[u8], endian: Endian) -> Self {
+                    match endian {
+                        Endian::Little => <$t>::from_le_bytes(Self::fixed(bytes, endian)),
+                        Endian::Big => <$t>::from_be_bytes(Self::fixed(bytes, endian))
+                    }
+                }
+                fn fixed(bytes: &[u8], endian: Endian) -> [u8; {std::mem::size_of::<$t>()}] {
+                    let size = {std::mem::size_of::<$t>()} - bytes.len();
+                    let mut add = vec![0;size];
+                    match endian {
+                        Endian::Big => {
+                            let mut vec = Vec::from(bytes);
+                            add.append(&mut vec);
+                            add.try_into().expect("OMGGGG")
+                        }
+                        Endian::Little => {
+                            let mut vec = Vec::from(bytes);
+                            vec.append(&mut add);
+                            vec.try_into().expect("OMGGGG")
+                        }
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_from_bytes!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);

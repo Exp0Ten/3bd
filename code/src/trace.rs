@@ -163,7 +163,7 @@ pub fn task_breapoints(comp_dir: PathBuf, index: usize, len: usize, pane: iced::
 }
 
 fn task_stack() -> iced::Task<window::Message> {
-    iced::Task::perform(async {ui::stack_lines(call_stack())}, |result| window::Message::Operation(Operation::Stack(result)))
+    iced::Task::perform(async {CallStack::stack_lines(call_stack())}, |result| window::Message::Operation(Operation::Stack(result)))
 }
 
 fn task_assembly(rip: u64) -> iced::Task<window::Message> {
@@ -364,9 +364,18 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         },
         Operation::Stack(result) => {
             match result {
-                Ok(stack) => state.internal.stack = Some(stack),
-                Err(()) => state.internal.stack = None
-            }
+                Ok(res) => {
+                    println!("YES");
+                    for i in res {
+                        println!("{} {}", i.0, i.1);
+                    }
+                },
+                Err(()) => println!("NU UH")
+            };
+//            match result {
+//                Ok(stack) => state.internal.stack = Some(stack),
+//                Err(()) => state.internal.stack = None
+//            }
         },
         _ => ()
     };

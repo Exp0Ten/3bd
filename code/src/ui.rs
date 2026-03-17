@@ -1512,56 +1512,57 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
     content
 }
 
+
 fn pane_view_stack<'a>(pane: &PaneStack) -> Container<'a, Message> {
     let content = container(text("TERMINAL"));
     content
 }
 
-pub fn stack_lines(stack: Result<CallStack, ()>) -> Result<Vec<(usize, String)>, ()> {
-    if stack.is_err() {
-        return Err(());
-    }
-
-    let functions = FUNCTIONS.access();
-    let dwarf_bind = DWARF.access();
-    let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
-
-    let mut stack = stack.unwrap();
-
-    stack.0.reverse();
-
-    let mut res = Vec::new();
-
-    for (call, function) in stack.0.iter().enumerate() {
-        let parent = match functions.as_ref().unwrap().subtype_parent.get(&function.debug_info_offset.unwrap()) {
-            Some(parent) => format!("{parent}::"),
-            None => "".to_string()
-        };
-        let return_type = match function.return_type {
-            Some(vtype) => format!(" -> {}", unwind_type(vtype, &dwarf).name(&dwarf)),
-            None => "".to_string()
-        };
-
-        if function.parameters.is_some() {
-            res.push((0, format!("{call}: {}{}(\n", parent, function.name)));
-            for param in function.parameters.as_ref().unwrap() {
-                param.lines(&mut res, &dwarf);
-            }
-            res.push((1, format!("){} \n", return_type,)));
-        } else {
-            res.push((0, format!("{call}: {}{}(){}\n", parent, function.name, return_type,)));
-        };
-        if function.variables.is_none() {
-            continue;
-        }
-
-        for var in function.variables.as_ref().unwrap() {
-            var.lines(&mut res, &dwarf)
-        }
-    };
-
-    Ok(res)
-}
+//pub fn stack_lines(stack: Result<CallStack, ()>) -> Result<Vec<(usize, String)>, ()> {
+//    if stack.is_err() {
+//        return Err(());
+//    }
+//
+//    let functions = FUNCTIONS.access();
+//    let dwarf_bind = DWARF.access();
+//    let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
+//
+//    let mut stack = stack.unwrap();
+//
+//    stack.0.reverse();
+//
+//    let mut res = Vec::new();
+//
+//    for (call, function) in stack.0.iter().enumerate() {
+//        let parent = match functions.as_ref().unwrap().subtype_parent.get(&function.debug_info_offset.unwrap()) {
+//            Some(parent) => format!("{parent}::"),
+//            None => "".to_string()
+//        };
+//        let return_type = match function.return_type {
+//            Some(vtype) => format!(" -> {}", unwind_type(vtype, &dwarf).name(&dwarf)),
+//            None => "".to_string()
+//        };
+//
+//        if function.parameters.is_some() {
+//            res.push((0, format!("{call}: {}{}(\n", parent, function.name)));
+//            for param in function.parameters.as_ref().unwrap() {
+//                param.lines(&mut res, &dwarf);
+//            }
+//            res.push((1, format!("){} \n", return_type,)));
+//        } else {
+//            res.push((0, format!("{call}: {}{}(){}\n", parent, function.name, return_type,)));
+//        };
+//        if function.variables.is_none() {
+//            continue;
+//        }
+//
+//        for var in function.variables.as_ref().unwrap() {
+//            var.lines(&mut res, &dwarf)
+//        }
+//    };
+//
+//    Ok(res)
+//}
 
 
 fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
@@ -2040,7 +2041,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         PaneMessage::MemoryChangeFormat(pane, base) => get_pane(panes, pane).memory().format = base,
         PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
         PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
-        PaneMessage::MemoryPaste(pane, data) => get_pane(panes, pane).memory().field = data, // perhaps sumbit right away
+        PaneMessage::MemoryPaste(pane, data) => get_pane(panes, pane).memory().field = data,
         PaneMessage::MemorySubmit(pane) => {
             let data = get_pane(panes, pane).memory();
             let field = &data.field;
@@ -2130,7 +2131,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             };
             data.input.clear();
         },
-        // Other
+        // Assembly
         PaneMessage::UpdateAssembly(result) => {
             match result {
                 Ok((assembly, line)) => {

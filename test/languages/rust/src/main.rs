@@ -45,6 +45,8 @@ fn main() {
         y: 20
     };
 
+    let gg = [13;13];
+
     fn wow(a: u64) {
         println!("wow");
     }
