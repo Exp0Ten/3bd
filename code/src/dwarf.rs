@@ -42,6 +42,7 @@ pub trait ImplSourceMap {
     fn get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf;
     fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex;
     fn index_with_line(&self, line: &SourceIndex) -> &SourceFile;
+    fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile;
 }
 
 impl ImplSourceMap for SourceMap {
@@ -87,6 +88,11 @@ impl ImplSourceMap for SourceMap {
     fn index_with_line(&self, line: &SourceIndex) -> &SourceFile {
         let vec = self.get(&line.hash_path).unwrap();
         &vec[line.index]
+    }
+
+    fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile {
+        let vec = self.get_mut(&line.hash_path).unwrap();
+        vec.get_mut(line.index).unwrap()
     }
 }
 
@@ -803,7 +809,7 @@ fn unwind (
 
     print!("p");
     //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
-    new_ev(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
+    extract_var(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
 
     print!("n");
     unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
@@ -830,7 +836,10 @@ fn unwind (
     Ok(false)
 }
 
-fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlice<'a, Endian>, usize>, dwarf: &'a Dwarf, unit: &Unit) -> (Function, Option<gimli::AttributeValue<EndianSlice<'a, Endian>>>) {
+fn extract_function_info<'a>(
+    entry: &gimli::DebuggingInformationEntry<EndianSlice<'a, Endian>, usize>,
+    dwarf: &'a Dwarf, unit: &Unit
+) -> (Function, Option<gimli::AttributeValue<EndianSlice<'a, Endian>>>) {
 
     let (name, return_type) = match entry.attr_value(gimli::DW_AT_specification) {
         Some(specification) => {
@@ -865,144 +874,14 @@ fn extract_function_info<'a>(entry: &gimli::DebuggingInformationEntry<EndianSlic
         debug_info_offset: None
     }, frame_base)
 }
+
 #[derive(Debug, Clone)]
 pub enum Location {
     Register(gimli::Register),
     Address(u64)
 }
 
-/*
-fn extract_variables<'a>(
-    function: &mut Function,
-    regs: &mut nix::libc::user_regs_struct,
-    frame_base: Option<u64>,
-    mut entries: gimli::EntriesCursor<'_, EndianSlice<'a, Endian>>,
-    dwarf: &'a Dwarf,
-    encoding: gimli::Encoding,
-    current_line: u64,
-    unit: &Unit
-) -> Result<(), ()> {
-    let fn_depth = entries.depth();
-    let mut first = true;
-    loop {
-        if first {
-            first = false;
-            entries.next_entry().unwrap();
-        } else {
-            match entries.current() {
-                Some(entry) => match entry.tag() {
-                    gimli::DW_TAG_subprogram | gimli::DW_TAG_inlined_subroutine => {entries.next_sibling().map_err(|_| ())?;} // skipping subfunctions and inlines
-                    _ => {entries.next_entry().map_err(|_| ())?;}
-                },
-                None => {entries.next_entry().map_err(|_| ())?; continue;}
-            }
-        };
-        if fn_depth == entries.depth() { // if the new entry has the same depth as the original fn_depth, then they are siblings and therefore we ran into the end of the function locals definition // we cant just use the null entry, because the some variables can be in deeper lexical fields, so this is the easiest
-            return Ok(());
-        }
-
-        let entry = match entries.current() { // skip null entries
-            Some(entry) => entry,
-            None => continue
-        };
-
-        if entry.tag() == gimli::DW_TAG_variable {
-            let declaration = entry.attr(gimli::DW_AT_decl_line).unwrap().udata_value().unwrap();
-
-            if declaration >= current_line {continue;}; // if you have a variable you havent declared yet, you dont want to show it right, cause its gonna be random gibberish yk
-
-            let name = String::from(
-                match entry.attr_value(gimli::DW_AT_name) {
-                    Some(attr) => string(attr, dwarf), //URL
-                    None => "0"
-                }
-            );
-
-            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
-
-            let location = match entry.attr_value(gimli::DW_AT_location) {
-                Some(attr) => {
-                    if attr.exprloc_value().is_some() {
-                        let expression = attr.exprloc_value().unwrap();
-                        let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
-                        match piece.location {
-                            gimli::Location::Register {register} => Some(Location::Register(register)),
-                            gimli::Location::Value {value} => Some(Location::Address(value.to_u64(NOMASK).unwrap())),
-                            gimli::Location::Address {address} => Some(Location::Address(address)),
-                            _ => panic!()
-                        }
-                    } else {
-                        let loclist = loclist_reference(attr, unit);
-                        Some(get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding)?)
-                    }
-                },
-                None => None
-            };
-
-            let constant = match entry.attr(gimli::DW_AT_const_value) {
-                Some(attr) => match attr.udata_value() {
-                    Some(val) => Some(val),
-                    None => {println!("WTF CONSTANT"); None} // i want to know if it does some weird shit
-                },
-                None => None
-            };
-
-            let var = Variable {
-                name,
-                location,
-                constant,
-                vtype,
-            };
-
-            function.variables.as_mut().unwrap().push(var);
-        }
-
-        if entry.tag() == gimli::DW_TAG_formal_parameter {
-            let name = String::from(
-                match entry.attr_value(gimli::DW_AT_name) {
-                    Some(attr) => string(attr, dwarf), //URL
-                    None => "0"
-                }
-            );
-
-            let vtype = debug_reference(entry.attr_value(gimli::DW_AT_type).unwrap(), unit);
-
-            let location = match entry.attr_value(gimli::DW_AT_location) {
-                Some(attr) => {
-                    if attr.exprloc_value().is_some() {
-                        let expression = attr.exprloc_value().unwrap();
-                        let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
-                        match piece.location {
-                            gimli::Location::Register {register} => Location::Register(register),
-                            gimli::Location::Value {value} => Location::Address(value.to_u64(NOMASK).unwrap()),
-                            gimli::Location::Address {address} => Location::Address(address),
-                            _ => panic!()
-                        }
-                    } else {
-                        let loclist = loclist_reference(attr, unit); //URL
-                        get_loclist_location(loclist, dwarf, unit, regs, frame_base, encoding)?
-                    }
-                },
-                //Some(attr) => Some(eval_expression(&attr.exprloc_value().unwrap(), 0, 0, 0, 0, encoding, Some(frame_base)).to_u64(0).unwrap()),
-                None => panic!("No param location, WHAT")
-            };
-
-            let param = Parameter {
-                name,
-                location,
-                vtype,
-            };
-
-            function.parameters.as_mut().unwrap().push(param);
-        }
-        // + there are other ones but whatever for now
-    }
-}
-*/
-
-
-
-fn new_ev<'a>(
+fn extract_var<'a>(
     function: &mut Function,
     regs: &mut nix::libc::user_regs_struct,
     frame_base: Option<u64>,
@@ -1413,11 +1292,30 @@ use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, NasmFormatter};
 
 const DEPTH: u64 = 64; // iteration limit
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Assembly {
     pub text: String,
     pub bytes: String,
     pub addresses: Vec<u64>
+}
+
+impl Assembly {
+    pub fn create(rip: u64) -> Result<(Self, usize), ()> {
+        let range = match trace::get_map_range(rip) {
+            Some(range) => range,
+            None => return Err(())
+        };
+        let base = (rip - rip%8 - 512).max(range.start);
+        let end = (base + 1024).min(range.end);
+        let size = end - base;
+
+        let bytes = trace::read_memory(base, size as usize)?;
+
+        let (pointer, line) = align_pointer(base, rip, &bytes)?;
+
+        let assembly = disassemble_code(pointer, &bytes[(pointer - base) as usize..])?;
+        Ok((assembly, line))
+    }
 }
 
 pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize), ()> { // the second one is the line number

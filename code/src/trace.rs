@@ -150,8 +150,24 @@ fn task_read() -> iced::Task<window::Message> {
     iced::Task::perform(object::read_stdout(), |result| window::Message::Operation(Operation::Read(result)))
 }
 
+pub fn task_content(file: PathBuf, index: SourceIndex, pane: Option<iced::widget::pane_grid::Pane>) -> iced::Task<window::Message> {
+    iced::Task::perform(async {ui::source_content(file)}, move |content| if content.is_some() {
+        window::Message::Pane(ui::PaneMessage::CodeLoad(pane, index.clone(), content.unwrap()))
+    } else {
+        window::Message::None
+    })
+}
+
+pub fn task_breapoints(comp_dir: PathBuf, index: usize, len: usize, pane: iced::widget::pane_grid::Pane) -> iced::Task<window::Message> {
+    iced::Task::perform(async move {ui::create_breakpoints(comp_dir, index, len)}, move |result| window::Message::Pane(ui::PaneMessage::CodeBreakpoints(pane, result)))
+}
+
 fn task_stack() -> iced::Task<window::Message> {
     iced::Task::perform(async {ui::stack_lines(call_stack())}, |result| window::Message::Operation(Operation::Stack(result)))
+}
+
+fn task_assembly(rip: u64) -> iced::Task<window::Message> {
+    iced::Task::perform(async move {Assembly::create(rip)}, |result| window::Message::Pane(ui::PaneMessage::UpdateAssembly(result)))
 }
 
 // Inner Tracing Logic
@@ -503,47 +519,46 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
     };
     state.internal.stopped = true;
 
+    let mut tasks = Vec::new();
 
-    let assembly_task = if ui::check_for_assembly(state) { // performance reasons
-        assembly_update(state, regs.rip)
-    } else {
-        None
+    if ui::check_for_assembly(state) { // performance reasons
+        tasks.push(task_assembly(regs.rip));
     };
 
     if state.internal.no_debug {
-        *task = assembly_task;
+        *task = Some(iced::Task::batch(tasks));
         return;
     }
-    let mut pane_task = None;
 
     let bind = LINES.access();
     let file = bind.as_ref().unwrap().get_line(regs.rip);
     state.internal.file = file.map(|index| index.clone());
     drop(bind);
-    let code_task = ui::code_panes_update(state, &mut pane_task);
-    match code_task {
-        Some(mut inner) => {
-            match assembly_task {
-                Some(asm_inner) => inner.push(asm_inner),
-                None => ()
-            };
-            pane_task = Some(iced::Task::batch(inner))
-        },
-        None => pane_task = assembly_task
+
+    if ui::check_for_code(state) {
+        if let Some((scroll, load)) = ui::code_panes_update(state) {
+            let index = state.internal.file.as_ref().unwrap();
+            let bind = SOURCE.access();
+            let source = bind.as_ref().unwrap().index_with_line(index);
+            let mut file = index.hash_path.clone();
+            file.push(source.path.clone());
+
+            if source.content.is_none() {
+                tasks.push(task_content(file, index.clone(), None).chain(load.chain(scroll)));
+            } else {
+                tasks.push(load.chain(scroll));
+            }
+        };
     }
+
     match &state.internal.file {
-        None => {println!("WHAT");*task = pane_task},
-        Some(file) => {
-        //Some(file) => if Some(file.hash_path.clone()) != state.internal.comp_dir {
-        //    println!("OKNOW");
-        //    *task = pane_task
-        //} else {
-            match pane_task {
-                Some(pane) => {println!("chained"); *task = Some(pane.chain(task_stack()))},
-                None => {println!("unchained");*task = Some(task_stack())}
-            };
-        }
+        Some(_) => {
+            tasks.push(task_stack());
+        },
+        None => ()
     }
+
+    *task = Some(iced::Task::batch(tasks));
 }
 
 fn reset() {
