@@ -783,7 +783,7 @@ pub struct PaneMemory {
 #[derive(Debug, Clone, Default)]
 struct PaneStack {
     open: Vec<bool>,
-    pinned: Vec<usize>
+    unique: u32 // id of the last update (in order to reload the open vec)
 }
 
 #[derive(Debug, Clone)]
@@ -870,11 +870,12 @@ pub enum PaneMessage {
     TerminalType(pane_grid::Pane, String),
     TerminalPaste(pane_grid::Pane, String),
     TerminalSend(pane_grid::Pane),
-    // Stack
-
-    // Other
-    UpdateAssembly(Result<(crate::dwarf::Assembly, usize), ()>),
-    UpdateCode
+    // Assembly
+    AssemblyUpdate(Result<(crate::dwarf::Assembly, usize), ()>),
+    //Stack
+    StackUpdate(pane_grid::Pane),
+    StackCollapse(pane_grid::Pane, usize),
+    StackExpand(pane_grid::Pane, usize)
 }
 
 pub fn content(state: &State) -> Container<'_, Message> {
@@ -991,7 +992,7 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
             }
             content = status_text(msg, content, size, default);
 
-            match &state.internal.file {
+            match &state.internal.pane.file {
                 Some(index) => {
                     let bind = SOURCE.access();
                     let source = bind.as_ref().unwrap();
@@ -1046,7 +1047,7 @@ fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_
         Pane::Code(pane) => (pane_view_code(pane, state, id), pane_titlebar("Code", "icons/pane_source.svg")),
         Pane::Control(pane) => (pane_view_control(pane, state, id), pane_titlebar("Control", "icons/pane_control.svg")),
         Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
-        Pane::Stack(pane) => (pane_view_stack(pane), pane_titlebar("CallStack", "icons/pane_stack.svg")),
+        Pane::Stack(pane) => (pane_view_stack(pane, state, id), pane_titlebar("CallStack", "icons/pane_stack.svg")),
         Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
         Pane::Assembly(pane) => (pane_view_assembly(pane, state, id), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
         Pane::Terminal(pane) => (pane_view_terminal(pane, state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
@@ -1116,7 +1117,7 @@ fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane)
         Some(file) => {
             let comp_path = PathBuf::from(pane.dir.as_ref().unwrap());
             let file_path = PathBuf::from(file);
-            let code = code_display(comp_path, file_path, source, pane, &state.internal.file);
+            let code = code_display(comp_path, file_path, source, pane, &state.internal.pane.file);
             if code.is_ok() {
                 container(scrollable(
                 code.unwrap()
@@ -1217,7 +1218,7 @@ fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, 
 }
 
 pub fn code_panes_update(state: &mut State) -> Option<(Task<Message>, Task<Message>)> {
-    let file = match &state.internal.file {
+    let file = match &state.internal.pane.file {
         Some(file) => file,
         None => return None
     };
@@ -1290,7 +1291,7 @@ pub fn check_for_code(state: &mut State) -> bool {
 }
 
 
-fn pane_view_control<'a>(pane: &PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+fn pane_view_control<'a>(pane: &'a PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 30;
 
     let file = FILE.access().is_some();
@@ -1513,88 +1514,89 @@ fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<
 }
 
 
-fn pane_view_stack<'a>(pane: &PaneStack) -> Container<'a, Message> {
-    let content = container(text("TERMINAL"));
+fn pane_view_stack<'a>(pane: &'a PaneStack, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+    let stack = match &state.internal.pane.stack {
+        Some(stack) => stack,
+        None => if PID.access().is_some() {
+            return program_message("Stack data not loaded")
+        } else {
+            return program_message("Start the program to display stack data.")
+        }
+    };
+
+    if pane.unique != state.internal.pane.unique_stack {
+        return container(column![
+            text("Old Stack Data").width(Length::Fill).center(),
+            container(button(text("Update Stack")).on_press(Message::Pane(PaneMessage::StackUpdate(id)))).width(Length::Fill).center_x(Length::Fill)
+        ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
+    };
+
+    let size: u16 = 23;
+
+    let open_vec = &pane.open;
+
+    let mut collapse = column![].width(size);
+    let mut lines = column![];
+
+    for (i, open) in open_vec.iter().enumerate() {
+        if !open {continue;}
+        let (depth, line) = &stack[i];
+        let data = if *depth == 0 {
+            text(line).style(style::widget_text)
+        } else {
+            text(line)
+        }.height(size).size(size-5);
+        lines = lines.push(
+            container(data)
+            .padding(padding::left(size*depth.checked_sub(1).unwrap_or(0) as u16)) // removing the indent on the closing brackets of params, while keeping correct collapse rules
+        );
+        match stack.get(i+1) {
+            Some((next_depth, _)) => if next_depth > depth {
+                collapse = collapse.push(collapse_button(open_vec[i+1], i, size, id));
+            } else {
+                collapse = collapse.push(container("").height(size));
+            }
+            None => ()
+        };
+    }
+
+
+    let content = container(
+        scrollable(
+            row![collapse, lines]
+        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+        .width(Length::Fill)
+        .height(Length::Fill)
+    ).style(style::back);
     content
 }
 
-//pub fn stack_lines(stack: Result<CallStack, ()>) -> Result<Vec<(usize, String)>, ()> {
-//    if stack.is_err() {
-//        return Err(());
-//    }
-//
-//    let functions = FUNCTIONS.access();
-//    let dwarf_bind = DWARF.access();
-//    let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
-//
-//    let mut stack = stack.unwrap();
-//
-//    stack.0.reverse();
-//
-//    let mut res = Vec::new();
-//
-//    for (call, function) in stack.0.iter().enumerate() {
-//        let parent = match functions.as_ref().unwrap().subtype_parent.get(&function.debug_info_offset.unwrap()) {
-//            Some(parent) => format!("{parent}::"),
-//            None => "".to_string()
-//        };
-//        let return_type = match function.return_type {
-//            Some(vtype) => format!(" -> {}", unwind_type(vtype, &dwarf).name(&dwarf)),
-//            None => "".to_string()
-//        };
-//
-//        if function.parameters.is_some() {
-//            res.push((0, format!("{call}: {}{}(\n", parent, function.name)));
-//            for param in function.parameters.as_ref().unwrap() {
-//                param.lines(&mut res, &dwarf);
-//            }
-//            res.push((1, format!("){} \n", return_type,)));
-//        } else {
-//            res.push((0, format!("{call}: {}{}(){}\n", parent, function.name, return_type,)));
-//        };
-//        if function.variables.is_none() {
-//            continue;
-//        }
-//
-//        for var in function.variables.as_ref().unwrap() {
-//            var.lines(&mut res, &dwarf)
-//        }
-//    };
-//
-//    Ok(res)
-//}
+fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane) -> button::Button<'a, Message> {
+    if open {
+        svg_button("icons/collapse.svg", size, Some(style::collapse_svg))
+        .on_press(Message::Pane(PaneMessage::StackCollapse(id, index)))
+    } else {
+        svg_button("icons/pane_terminal.svg", size, Some(style::collapse_svg_toggled))
+        .on_press(Message::Pane(PaneMessage::StackExpand(id, index)))
+    }.style(style::breakpoint)
+}
 
-
-fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+fn pane_view_registers<'a>(pane: &'a PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     fn flags(num: u64) -> String {
-        let mut buf = String::new();
-        if num & (1 << 11) != 0 {
-            buf.push_str("|OF");
+        let of = if num & (1 << 11) != 0 {"|OF"} else {""};
+        let df = if num & (1 << 10) != 0 {"|DF"} else {""};
+        let sf = if num & (1 << 7)  != 0 {"|SF"} else {""};
+        let zf = if num & (1 << 6)  != 0 {"|ZF"} else {""};
+        let af = if num & (1 << 4)  != 0 {"|AF"} else {""};
+        let pf = if num & (1 << 2)  != 0 {"|PF"} else {""};
+        let cf = if num & (1)       != 0 {"|CF"} else {""};
+        let mut display = format!("{}{}{}{}{}{}{}", of, df, sf, zf, af, pf, cf);
+        if display.len() > 0 {
+            display.push('|');
         };
-        if num & (1 << 10) != 0 {
-            buf.push_str("|DF");
-        };
-        if num & (1 << 7) != 0 {
-            buf.push_str("|SF");
-        };
-        if num & (1 << 6) != 0 {
-            buf.push_str("|ZF");
-        };
-        if num & (1 << 4) != 0 {
-            buf.push_str("|AF");
-        };
-        if num & (1 << 2) != 0 {
-            buf.push_str("|PF");
-        };
-        if num & (1) != 0 {
-            buf.push_str("|CF");
-        };
-
-        if buf.len() > 0 {
-            buf.push('|');
-        };
-        buf
+        display
     }
+
 
     let size = 30;
 
@@ -1717,7 +1719,7 @@ fn pane_view_registers<'a>(pane: &PaneRegisters, state: &'a State, id: pane_grid
 }
 
 
-fn pane_view_assembly<'a>(pane: &PaneAssembly, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+fn pane_view_assembly<'a>(pane: &'a PaneAssembly, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     if PID.access().is_none() {
         return program_message("Start the program to display assembly instructions.");
     }
@@ -1726,7 +1728,7 @@ fn pane_view_assembly<'a>(pane: &PaneAssembly, state: &'a State, id: pane_grid::
 
     let rip = REGISTERS.access().unwrap().rip;
 
-    let assembly = if let Some(assembly) = &state.internal.assembly {
+    let assembly = if let Some(assembly) = &state.internal.pane.assembly {
         let breakpoints = column(
             assembly.addresses.iter().map(|address| 
                 breakpoint_button(Some(normal(*address)), size-5).into()
@@ -1795,7 +1797,7 @@ pub fn check_for_assembly(state: &mut State) -> bool {
 }
 
 
-fn pane_view_terminal<'a>(pane: &PaneTerminal, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+fn pane_view_terminal<'a>(pane: &'a PaneTerminal, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
     let size = 20;
 
     if PID.access().is_none() {
@@ -1814,7 +1816,7 @@ fn pane_view_terminal<'a>(pane: &PaneTerminal, state: &'a State, id: pane_grid::
 
     let output = container(
         scrollable(
-            text(format!("{}_", state.internal.output)).size(size-5).line_height(0.95)
+            text(format!("{}_", state.internal.pane.output)).size(size-5).line_height(0.95)
         ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
         .anchor_bottom()
         .anchor_left()
@@ -2031,8 +2033,8 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         PaneMessage::CodeToggleUpdate(pane) => {
             let data = get_pane(panes, pane).code();
             data.update ^= true;
-            if data.update && state.internal.file.is_some() {
-                let (scroll, load) = code_update(pane, state.internal.file.as_ref().unwrap(), data);
+            if data.update && state.internal.pane.file.is_some() {
+                let (scroll, load) = code_update(pane, state.internal.pane.file.as_ref().unwrap(), data);
                 *task = Some(load.chain(scroll));
             }
         },
@@ -2132,25 +2134,49 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             data.input.clear();
         },
         // Assembly
-        PaneMessage::UpdateAssembly(result) => {
+        PaneMessage::AssemblyUpdate(result) => {
             match result {
                 Ok((assembly, line)) => {
-                    state.internal.assembly = Some(assembly);
+                    state.internal.pane.assembly = Some(assembly);
                     assembly_scroll(state, line, task);
                 }
-                Err(()) => state.internal.assembly = None
+                Err(()) => state.internal.pane.assembly = None
             }
+        }
+        // Stack
+        PaneMessage::StackUpdate(pane) => {
+            let data = get_pane(panes, pane).stack();
+            data.unique = state.internal.pane.unique_stack;
+            if state.internal.pane.stack.is_none() {return;}
+
+            let stack = state.internal.pane.stack.as_ref().unwrap();
+            let mut first = true;
+            let mut open_new: Vec<bool> = stack.iter().rev().map(|(depth, _)| { // this maps all of the function lines to be shown, and the first function to be expanded
+                if first {
+                    if *depth == 0 {
+                        first = false;
+                    }
+                    true
+                } else {
+                    *depth == 0
+                }
+            }).collect();
+
+            open_new.reverse(); // because we iterated in reverse
+            data.open = open_new;
+        }
+        PaneMessage::StackCollapse(pane, line) => {
+            let data = get_pane(panes, pane).stack();
+            let stack = state.internal.pane.stack.as_ref().unwrap();
+            stack_open(stack, data, line, false);
+        }
+        PaneMessage::StackExpand(pane, line) => {
+            let data = get_pane(panes, pane).stack();
+            let stack = state.internal.pane.stack.as_ref().unwrap();
+            stack_open(stack, data, line, true);
         }
         _ => ()
     };
-}
-
-pub fn process_string(file: &mut String) {
-    *file = file.chars().map(|char| match char {
-        '\n' => "\n".to_string(),
-        '\t' => "    ".to_string(),
-        _ => if char.is_ascii_control() {"".to_string()} else {char.to_string()}
-    }).collect()
 }
 
 pub fn source_content(file: PathBuf) -> Option<String> {
@@ -2227,6 +2253,14 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
     pane.data = data.unwrap();
 }
 
+fn stack_open(stack: &Vec<(usize, String)>, pane: &mut PaneStack, line: usize, open: bool) {
+    let upper = stack[line].0;
+    let open_vec = &mut pane.open;
+    for (i, (depth, _)) in stack.iter().skip(line+1).enumerate() {
+        if *depth == upper {break;}
+        open_vec[i+line+1] = open;
+    };
+}
 
 // Layout Logic
 
@@ -2381,12 +2415,20 @@ fn widget_fill<'a>() -> Container<'a, Message> {
 }
 
 fn delimiter<'a>(width: usize) -> Container<'a, Message> {
-    container(text("|")).width(Length::Fixed(width as f32)).height(Length::Fill)
+    container("").width(Length::Fixed(width as f32)).height(Length::Fill)
 }
 
-fn program_message<'a>(msg: &'a str) -> Container<'a, Message> {
+fn program_message<'a>(msg: &'a str) -> Container<'a, Message> { // When the ui isnt active, use this container instead
     container(text(msg).center().height(Length::Fill).width(Length::Fill))
     .height(Length::Fill)
     .width(Length::Fill)
     .style(style::back)
+}
+
+pub fn process_string(file: &mut String) { // iced default font cannot display every character (even ones like tabs and such), therefore we replace them
+    *file = file.chars().map(|char| match char {
+        '\n' => "\n".to_string(),
+        '\t' => "    ".to_string(),
+        _ => if char.is_ascii_control() {"".to_string()} else {char.to_string()}
+    }).collect()
 }

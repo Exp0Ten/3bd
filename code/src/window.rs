@@ -24,7 +24,6 @@ pub struct App {
 pub struct State {
     pub layout: Layout,
     pub internal: Internal,
-
     pub status: Option<nix::sys::wait::WaitStatus>,
     pub last_signal: Option<nix::sys::signal::Signal>,
 }
@@ -36,11 +35,17 @@ pub struct Internal {
     pub breakpoint: bool,
     pub manual: bool,
     pub source_step: Option<trace::Breakpoints>,
+    pub pane: PaneData
+}
+
+#[derive(Debug, Default)]
+pub struct PaneData {
     pub file: Option<crate::dwarf::SourceIndex>,
     pub comp_dir: Option<std::path::PathBuf>,
     pub output: String,
     pub assembly: Option<crate::dwarf::Assembly>,
-    pub stack: Option<Vec<(usize, String)>>
+    pub stack: Option<Vec<(usize, String)>>,
+    pub unique_stack: u32
 }
 
 #[derive(Debug, Clone)]

@@ -167,7 +167,11 @@ fn task_stack() -> iced::Task<window::Message> {
 }
 
 fn task_assembly(rip: u64) -> iced::Task<window::Message> {
-    iced::Task::perform(async move {Assembly::create(rip)}, |result| window::Message::Pane(ui::PaneMessage::UpdateAssembly(result)))
+    iced::Task::perform(async move {Assembly::create(rip)}, |result| window::Message::Pane(ui::PaneMessage::AssemblyUpdate(result)))
+}
+
+fn task_stack_update(id: iced::widget::pane_grid::Pane) -> iced::Task<window::Message> {
+    iced::Task::done(window::Message::Pane(ui::PaneMessage::StackUpdate(id)))
 }
 
 // Inner Tracing Logic
@@ -253,7 +257,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             let mut breakpoints = Breakpoints::new();
             let bind = LINES.access();
             for (address, source) in bind.as_ref().unwrap().iter() { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
-                if source.hash_path != *state.internal.comp_dir.as_ref().unwrap() {
+                if source.hash_path != *state.internal.pane.comp_dir.as_ref().unwrap() {
                     //continue;
                 }
                 let byte = insert_breakpoint(pid, anti_normal(*address)).unwrap();
@@ -337,8 +341,9 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             state.internal.source_step = None;
             state.internal.manual = false;
             state.internal.breakpoint = false;
-            state.internal.file = None;
-            state.internal.output.clear();
+            state.internal.pane.file = None;
+            state.internal.pane.output.clear();
+            state.internal.pane.stack = None;
             state.last_signal = None;
             reset();
         },
@@ -360,10 +365,10 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
             ui::process_string(&mut text);
 
-            state.internal.output.push_str(&text);
+            state.internal.pane.output.push_str(&text);
         },
         Operation::Stack(result) => {
-            match result {
+            match result.clone() {
                 Ok(res) => {
                     println!("YES");
                     for i in res {
@@ -372,10 +377,24 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 },
                 Err(()) => println!("NU UH")
             };
-//            match result {
-//                Ok(stack) => state.internal.stack = Some(stack),
-//                Err(()) => state.internal.stack = None
-//            }
+            match result {
+                Ok(stack) => state.internal.pane.stack = Some(stack),
+                Err(()) => {state.internal.pane.stack = None; return;}
+            }
+
+            state.internal.pane.unique_stack += 1; // We create a new unique (it doesnt have to be a random one, just a different one every time)
+            // we need it because the PaneStack might be hidden due to sidebars, so we need a way to tell, if a pane has old data or not
+
+            let mut tasks = Vec::new();
+
+            for (id, pane) in state.layout.panes.iter() {
+                match pane {
+                    ui::Pane::Stack(..) => tasks.push(task_stack_update(*id)),
+                    _ => ()
+                }
+            }
+
+            *task = Some(iced::Task::batch(tasks));
         },
         _ => ()
     };
@@ -411,7 +430,7 @@ fn panes_preload(state: &mut window::State, task: &mut Option<iced::Task<window:
     let panes = &mut state.layout.panes;
 
     let (comp_dir, main_file) = get_main_file();
-    state.internal.comp_dir = Some(PathBuf::from(comp_dir.clone()));
+    state.internal.pane.comp_dir = Some(PathBuf::from(comp_dir.clone()));
     let mut tasks = Vec::new();
 
     for (id, pane) in panes.iter_mut() {
@@ -541,12 +560,12 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
 
     let bind = LINES.access();
     let file = bind.as_ref().unwrap().get_line(regs.rip);
-    state.internal.file = file.map(|index| index.clone());
+    state.internal.pane.file = file.map(|index| index.clone());
     drop(bind);
 
     if ui::check_for_code(state) {
         if let Some((scroll, load)) = ui::code_panes_update(state) {
-            let index = state.internal.file.as_ref().unwrap();
+            let index = state.internal.pane.file.as_ref().unwrap();
             let bind = SOURCE.access();
             let source = bind.as_ref().unwrap().index_with_line(index);
             let mut file = index.hash_path.clone();
@@ -560,7 +579,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         };
     }
 
-    match &state.internal.file {
+    match &state.internal.pane.file {
         Some(_) => {
             tasks.push(task_stack());
         },
@@ -588,8 +607,9 @@ fn reset_file(state: &mut window::State) -> Result<(), ()> {
         }
         reset();
     }
-    state.internal.comp_dir = None;
-    state.internal.file = None;
+    state.internal.pane.comp_dir = None;
+    state.internal.pane.file = None;
+    state.internal.pane.stack = None;
     state.internal.stopped = false;
     FILE.none();
     DWARF.none();
@@ -607,7 +627,7 @@ fn reset_file(state: &mut window::State) -> Result<(), ()> {
 fn state_cont(state: &mut window::State) {
     state.last_signal = None;
     state.internal.breakpoint = false;
-    state.internal.file = None;
+    state.internal.pane.file = None;
 }
 
 fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<window::Message>> {
@@ -635,7 +655,7 @@ fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<win
         Err(()) => return None
     };
 
-    state.internal.assembly = Some(assembly);
+    state.internal.pane.assembly = Some(assembly);
 
     ui::assembly_scroll(state, line, &mut task);
 

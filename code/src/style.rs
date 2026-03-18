@@ -180,6 +180,21 @@ pub fn breakpoint_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style
     }
 }
 
+pub fn collapse_svg(theme: &Theme, status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: match status {
+            svg::Status::Idle => Some(theme.extended_palette().background.base.color),
+            svg::Status::Hovered => Some(theme.extended_palette().secondary.base.color)
+        }
+    }
+}
+
+pub fn collapse_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: Some(theme.extended_palette().secondary.base.color)
+    }
+}
+
 pub fn address(theme: &Theme, status: text_input::Status, incorrect: bool) -> text_input::Style {
     let mut default = text_input::default(theme, status);
     default.value = theme.extended_palette().primary.base.color;
