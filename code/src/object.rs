@@ -105,12 +105,12 @@ pub fn read_source(file: &Path) -> Result<String, ()> {
 
 pub async fn read_stdout() -> Result<(Vec<u8>, usize), ()> {
     let mut buf = vec![0;256]; // 256 bytes per read
-    let amount = stdio().read(&mut buf).map_err(|_| ())?;
+    let amount = stdio()?.read(&mut buf).map_err(|_| ())?;
     Ok((buf, amount))
 }
 
-pub fn stdio() -> pty::PtyMaster {
+pub fn stdio() -> Result<pty::PtyMaster, ()> {
     unsafe {
-        pty::PtyMaster::from_owned_fd(STDIO.access().as_ref().unwrap().try_clone().unwrap())
+        Ok(pty::PtyMaster::from_owned_fd(STDIO.access().as_ref().ok_or(())?.try_clone().unwrap()))
     }
 }

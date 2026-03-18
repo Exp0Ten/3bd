@@ -19,6 +19,8 @@ use crate::{
 
 const EXTRABOLD: font::Font = font::Font {weight: font::Weight::ExtraBold, ..font::Font::DEFAULT};
 const BOLD: font::Font = font::Font {weight: font::Weight::Bold, ..font::Font::DEFAULT};
+const SIDERATIO: f32 = 0.25; // (0.1; 0.4)
+
 
 pub struct Layout {
     status_bar: bool,
@@ -44,8 +46,6 @@ impl Default for Layout {
         }
     }
 }
-
-const SIDERATIO: f32 = 0.25; // (0.1; 0.4)
 
 impl Layout {
     fn panes_config() -> pane_grid::State<Pane> {
@@ -1048,7 +1048,7 @@ fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_
         Pane::Control(pane) => (pane_view_control(pane, state, id), pane_titlebar("Control", "icons/pane_control.svg")),
         Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
         Pane::Stack(pane) => (pane_view_stack(pane, state, id), pane_titlebar("CallStack", "icons/pane_stack.svg")),
-        Pane::Registers(pane) => (pane_view_registers(pane, state, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
+        Pane::Registers(pane) => (pane_view_registers(pane, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
         Pane::Assembly(pane) => (pane_view_assembly(pane, state, id), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
         Pane::Terminal(pane) => (pane_view_terminal(pane, state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
         Pane::Info => (pane_view_info(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
@@ -1322,9 +1322,18 @@ fn pane_view_control<'a>(pane: &'a PaneControl, state: &'a State, id: pane_grid:
     .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
     .style(style::widget_button);
 
-    let source_step = svg_button("icons/source_step.svg", size, Some(if stopped & !state.internal.no_debug {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if stopped & !state.internal.no_debug {Some(Message::Operation(Operation::SourceStep))} else {None})
-    .style(style::widget_button);
+    let source_step = svg_button(
+        "icons/source_step.svg",
+        size, 
+        Some(
+            if stopped & !state.internal.no_debug & state.last_signal.is_none() {style::widget_svg}
+            else {style::button_svg_disabled}
+        )
+    ).on_press_maybe(
+        if stopped & !state.internal.no_debug & state.last_signal.is_none() {
+            Some(Message::Operation(Operation::SourceStep))
+        } else {None}
+    ).style(style::widget_button);
 
     let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
     .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
@@ -1581,7 +1590,7 @@ fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane)
     }.style(style::breakpoint)
 }
 
-fn pane_view_registers<'a>(pane: &'a PaneRegisters, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+fn pane_view_registers<'a>(pane: &'a PaneRegisters, id: pane_grid::Pane) -> Container<'a, Message> {
     fn flags(num: u64) -> String {
         let of = if num & (1 << 11) != 0 {"|OF"} else {""};
         let df = if num & (1 << 10) != 0 {"|DF"} else {""};
@@ -2128,7 +2137,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             let data = get_pane(panes, pane).terminal();
             data.input.push('\n');
 
-            if object::stdio().write(data.input.as_bytes()).is_err() {
+            if object::stdio().unwrap().write(data.input.as_bytes()).is_err() {
                 return;
             };
             data.input.clear();
