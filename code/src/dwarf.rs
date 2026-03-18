@@ -554,8 +554,8 @@ fn get_cfa(unwind: &UnwindInfo, regs: &mut nix::libc::user_regs_struct, eh_frame
 fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<(), ()> {
     // register unwind rules
     let rules = unwind.row.as_ref().unwrap().registers();
-
     for (reg, rule) in rules { // we iterate through the rules
+        println!("{:?}", reg);
         let value = unwind_register(rule, cfa, regs, eh_frame, encoding);
         match value {
             Ok(value) => *match_register(reg, regs) = value,
@@ -874,6 +874,8 @@ fn unwind (
     print!("m");
     let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
 
+
+
     print!("o");
     let frame_base = if frame_attribute.is_some() {
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
@@ -887,7 +889,33 @@ fn unwind (
         None
     };
 
-    println!("{}\n {:?}",cfa, frame_base);
+    regs.rsp = cfa; // This requires explanation:
+
+    /*
+    Because Rust creates only some Dwarf data and is not completely supported, it does things quite differently compared to other languages.
+    For example most languages use the FrameBase as the CFA, and one could consider it the standard as every function creates a stack frame if it changes the rsp at any point.
+    Now Rust on the other hand uses RSP as the FrameBase. This inherently disconnects it from the evaluation process of the CFA. But that should be fine right?
+
+    Well... sort of. The CFA always has a rule as you always need a way to recover your return address (you could ofcourse just use rsp for that but uh oh, what if you have no rsp etc..)
+    So first you unwind the CFA, and then you can proceed with all of the registers. But DWARF (and gimli) doesnt specify the unwindinfo if it uses the DEFAULT rule.
+    And the default rule is REALLY HARD to get to.
+
+    Now combining that with rust: our RSP stays the same during unwinds. BIG PROBLEM. the effect is simple: Variable values from previous calls wont be correct.
+    Its not that big of an issue but to me, incredibly irritating. So i spent around 2 hours staring at the Output and comparing values.
+
+    Apparently the rsp should be equal to the previous CFA. But not always, and what about the other languages? How will that work.
+    Well i can just leave the regs to get unwound after, therefore if there IS a rule to unwind the RSP, it will use that.
+
+    But its is INCREDIBLY unsafe, so much i want to create the only single feature flag for this project.
+    either that, or i want to put a setting into the config.
+
+    The problem with just overwriting a saved register is when a different register is bound to its value. In that case we would have to first check whether it actually is scheduled to be unwound.
+    THEN and ONLY THEN we could change it AFTER all of the other register were unwound. but yea a long and tedious process
+
+    TLDR: might not work, be careful
+    */
+
+    println!("{}\n {:?} {}",cfa, frame_base, regs.rsp);
 
     print!("p");
     //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
