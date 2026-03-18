@@ -31,6 +31,7 @@ pub struct State {
 #[derive(Debug, Default)]
 pub struct Internal {
     pub no_debug: bool,
+    pub static_exec: bool,
     pub stopped: bool,
     pub breakpoint: bool,
     pub manual: bool,
@@ -61,8 +62,7 @@ pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
     .theme(App::theme)
     .window(App::default().settings)
-//    .subscription(App::subscription) //probably will be needed
-    .run_with(|| (App::default(), Task::none())) // make a function to select between default config and user modified config
+    .run_with(|| (App::default(), Task::none()))
 }
 
 impl App {
@@ -106,12 +106,6 @@ impl App {
     fn settings(&self) -> window::Settings {
         self.settings.clone()
     }
-
-    //fn subscription(&self) -> iced::Subscription<Message> {
-    //    
-    //    iced::Subscription::none()
-    //}
-
 }
 
 // DIALOG FUNCTIONS (those small windows when your program encounters an error, or when you wanna pick a file, you absolutely know what i mean just cant remember trust me)

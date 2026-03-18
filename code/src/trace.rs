@@ -202,7 +202,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             }
             FILE.sets(file.clone());
 
-            let no_debug = dwarf_set().is_err(); // preloading all dwarf related data
+            let no_debug = dwarf_set(state).is_err(); // preloading all dwarf related data
             state.internal.no_debug = no_debug;
             if no_debug {
                 Dialog::warning(&format!("This file ({}) does not contain debbuging data.", file.file_name().unwrap().to_str().unwrap()), None);
@@ -243,17 +243,12 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         Operation::Step => {
             if step(PID.access().unwrap(), state.last_signal).is_err() {return;};
             state_cont(state);
-            if !state.internal.manual {
-                *task = Some(task_wait())
-            }
+            *task = Some(task_wait())
         },
         Operation::SourceStep => {
             let pid = PID.access().unwrap();
-            if !state.internal.manual {
-                if step(pid, state.last_signal).is_err() {return;};
-                state.last_signal = None;
-                let _ = wait(pid);
-            }
+            if step(pid, None).is_err() {return;};
+            let _ = wait(pid);
             let mut breakpoints = Breakpoints::new();
             let bind = LINES.access();
             for (address, source) in bind.as_ref().unwrap().iter() { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
@@ -270,9 +265,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             state.internal.source_step = Some(breakpoints);
             state.internal.stopped = false;
             state_cont(state);
-            if !state.internal.manual {
-                *task = Some(task_wait())
-            }
+            *task = Some(task_wait())
         },
         Operation::Pause => {
             if send_signal(PID.access().unwrap(), Signal::SIGTRAP).is_err() {
@@ -282,10 +275,8 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         },
         Operation::Continue => {
             let pid = PID.access().unwrap();
-            if !state.internal.manual {
-                if step(pid, None).is_err() {return;};
-                let _ = wait(pid);
-            }
+            if step(pid, None).is_err() {return;};
+            let _ = wait(pid);
             if BREAKPOINTS.access().as_mut().unwrap().enable_all().is_err() {
                 *task = Some(task_reset());
                 return;
@@ -296,9 +287,9 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 };
                 return;
             };
-            if !state.internal.manual {
-                *task = Some(task_wait())
-            }
+
+            *task = Some(task_wait());
+
             state_cont(state);
             state.internal.stopped = false;
             state.internal.manual = false;
@@ -400,7 +391,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
     };
 }
 
-fn dwarf_set() -> Result<(), ()> {
+fn dwarf_set(state: &mut window::State) -> Result<(), ()> {
     #[allow(static_mut_refs)]
     let data = unsafe {
         &DATA
@@ -415,8 +406,19 @@ fn dwarf_set() -> Result<(), ()> {
         object_foreign::Endianness::Little => Endian::Little,
         object_foreign::Endianness::Big => Endian::Big
     };
+
+    match &object {
+        ::object::File::Elf64(elf) => {
+            if elf.elf_header().e_type.get(object.endianness()) == 2 {
+                state.internal.static_exec = true;
+            }
+        },
+        _ => ()
+    }
+
     ENDIAN.sets(endian);
     EHFRAME.sets(EhFrame::new(object));
+
 
     load_source(dwarf.dwarf(endian));
     parse_functions(dwarf.dwarf(endian));
@@ -458,6 +460,7 @@ fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Tas
             continue;
         }
         if map.offset == 0 {
+            if state.internal.static_exec {break;}
             EXEC_SHIFT.sets(map.range.start);
             break;
         }
@@ -516,7 +519,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         Ok(info) => info,
         Err(_) => return
     };
-
+    println!("{:?}", info);
     match info.si_code {
         TRAP_BRKPT|SI_KERNEL => {
             state.internal.breakpoint = true;

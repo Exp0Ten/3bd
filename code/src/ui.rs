@@ -2120,7 +2120,18 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         },
         PaneMessage::MemoryReset(pane) => {
             let data = get_pane(panes, pane).memory();
-            data.address = anti_normal(0);
+            let mut beginning = 0;
+            if state.internal.static_exec {
+                for map in MAPS.access().as_ref().unwrap() {
+                    if map.name != FILE.access().as_ref().unwrap().to_str().unwrap() {continue;}
+                    if map.offset == 0 {
+                        beginning = map.range.start
+                    }
+                };
+            } else {
+                beginning = anti_normal(0)
+            };
+            data.address = beginning;
             let hex_check = data.field.get(0..2);
             if hex_check.is_none() || hex_check.unwrap() == "0x" {
                 data.field = format!("0x{:x}",data.address);
