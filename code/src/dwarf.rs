@@ -569,7 +569,7 @@ fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_re
 fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<u64, ()> {
     println!("{:?}", register_rule);
     match register_rule {
-        gimli::RegisterRule::Offset(addr_offset) => Ok(slice_to_u64(&unwind_memory((cfa as i64 + addr_offset) as u64, 8))),
+        gimli::RegisterRule::Offset(addr_offset) => Ok(slice_to_u64(&unwind_memory((cfa as i64 + addr_offset) as u64, 8)?)),
         gimli::RegisterRule::Expression(expression) => {
             let expression = expression.get(eh_frame).unwrap();
             let piece = eval_expression(&expression, regs, Some(cfa), None, encoding)?[0];
@@ -578,7 +578,7 @@ fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &
                     gimli::Location::Value {value} => value.to_u64(NOMASK).unwrap(),
                     _ => panic!("Register Expression Error")
                 }
-            , 8))
+            , 8)?)
         )},
         gimli::RegisterRule::ValOffset(offset) => Ok((cfa as i64 + offset) as u64),
         gimli::RegisterRule::ValExpression(expression) => {
@@ -619,8 +619,8 @@ fn match_register<'a>(register: &gimli::Register, regs: &'a mut nix::libc::user_
     }
 }
 
-fn unwind_memory(address: u64, size: u8) -> Vec<u8> { // for reading small amounts of data from the memory (a wrapper)
-    trace::read_memory(address, size as usize).expect("Memory Unwind Exception")
+fn unwind_memory(address: u64, size: u8) -> Result<Vec<u8>, ()> { // for reading small amounts of data from the memory (a wrapper)
+    trace::read_memory(address, size as usize)
 }
 
 fn eval_expression<'a>(
@@ -638,7 +638,7 @@ fn eval_expression<'a>(
         match result {
             gimli::EvaluationResult::Complete => break,
             gimli::EvaluationResult::RequiresMemory { address, size, .. } => {
-                let data = unwind_memory(address, size);
+                let data = unwind_memory(address, size)?;
                 result = evaluation.resume_with_memory(gimli::Value::U64(slice_to_u64(&data))).map_err(|_| ())?;
             },
             gimli::EvaluationResult::RequiresRegister { register, .. } => {
@@ -650,7 +650,11 @@ fn eval_expression<'a>(
             gimli::EvaluationResult::RequiresCallFrameCfa => {
                 result = evaluation.resume_with_call_frame_cfa(cfa.ok_or(())?).map_err(|_| ())?;
             }
-            _ => unimplemented!("Unimplemented Expression Evaluation")
+            gimli::EvaluationResult::RequiresRelocatedAddress(address) => {
+                let new = anti_normal(address);
+                result = evaluation.resume_with_relocated_address(new).map_err(|_| ())?;
+            }
+            _ => {println!("Unimplemented Evaluation Expression"); return Err(())}
         }
     }
     Ok(evaluation.result())
@@ -1498,7 +1502,9 @@ impl <'a>StructType<'a> {
         };
 
         res.append(&mut new_buf);
-        res.last_mut().unwrap().1.pop();
+        if let Some(res) = res.last_mut() {
+            res.1.pop();
+        };
         res.push((depth, "}".to_string()));
         if let Some(name) = self.name {
             format!("{} {}", name, '{')
