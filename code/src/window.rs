@@ -9,7 +9,7 @@ use iced::{
 use rfd;
 
 use crate::{
-    ui::*, config, trace, data
+    ui, trace, data::*
 };
 
 #[derive(Default)]
@@ -17,12 +17,11 @@ pub struct App {
     pub state: State,
     pub theme: Theme,
     pub settings: window::Settings, //while these settings dont affect the window settings on runtime, we still save them for conditional use with the UI, like decorations or creating a new window
-    // add more as needed
 }
 
 #[derive(Default)]
 pub struct State {
-    pub layout: Layout,
+    pub layout: ui::Layout,
     pub internal: Internal,
     pub status: Option<nix::sys::wait::WaitStatus>,
     pub last_signal: Option<nix::sys::signal::Signal>,
@@ -51,11 +50,10 @@ pub struct PaneData {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Layout(LayoutMessage),
-    Pane(PaneMessage),
+    Layout(ui::LayoutMessage),
+    Pane(ui::PaneMessage),
     Operation(trace::Operation),
     None
-    // add more as needed
 }
 
 pub fn run_app() -> iced::Result {
@@ -67,12 +65,23 @@ pub fn run_app() -> iced::Result {
 
 impl App {
     fn default() -> Self {
-        //config::get_app().unwrap_or(Self::new())
+        let config = CONFIG.access().as_ref().unwrap().window.clone().unwrap();
+        let size = match config.size {
+            Some((width, height)) => iced::Size::new(width as f32, height as f32),
+            None => iced::window::Settings::default().size
+        };
+        let position = match config.position {
+            Some((x, y)) => iced::window::Position::Specific(iced::Point { x: x as f32, y: y as f32 }),
+            None => iced::window::Position::Default
+        };
         Self {
             state: State::default(),
-            theme: Theme::TokyoNight,
+            theme: config.theme.unwrap().to_iced_theme(),
             settings: window::Settings { // no icon unfortunately, no support for Wayland
                 decorations: true,
+                size,
+                position,
+                min_size: Some(iced::Size { width: 400., height: 400. }),
                 ..Default::default()
             }
         }
@@ -83,8 +92,8 @@ impl App {
         let state = &mut self.state;
         match message {
             Message::Operation(operation) => trace::operation_message(state, operation, &mut task),
-            Message::Layout(layout) => layout_message(state, layout),
-            Message::Pane(pane) => pane_message(state, pane, &mut task),
+            Message::Layout(layout) => ui::layout_message(state, layout),
+            Message::Pane(pane) => ui::pane_message(state, pane, &mut task),
             _ => ()
         };
 
@@ -94,7 +103,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
 
-        let content = content(state);
+        let content = ui::content(state);
 
         content.into()
     }

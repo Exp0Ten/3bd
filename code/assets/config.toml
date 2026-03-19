@@ -1,5 +1,40 @@
 
 
+[feature]
+exp_rust_unwind = true 
+# if you are debbuging programs written in rust (or you encounter errors in stack info of previous function calls) you should set this flag to true
+# it is on by default, so similarly if you encounter stack info errors (meaning the variables are showing weird values) while debbuging DWARF fully-supported languages (like c or c++), try setting this flag to false
+
+[window]
+# size = [600, 500] # (width, height), min (400, 400)
+# position = [200, 200] # (x, y), does not work on Wayland
+theme = "tokyonight"
+
+# Available Themes:
+# "light"
+# "dark"
+# "dracula"
+# "nord"
+# "solarized_light"
+# "Solarized_Dark"
+# "gruvbox_light"
+# "gruvbox_dark"
+# "catppuccin_latte"
+# "catppuccin_frappe"
+# "catppuccin_macchiato"
+# "catppuccin_mocha"
+# "tokyonight"
+# "tokyonight_storm"
+# "tokyonight_light"
+# "kanagawa_wave"
+# "kanagawa_dragon"
+# "kanagawa_lotus"
+# "moonfly"
+# "nightfly"
+# "oxocarbon"
+# "ferra"
+
+
 [layout]
 status_bar = true
 sidebar_left = true
@@ -12,3 +47,13 @@ main = ["code"] # next to each other
 left = ["control", "memory"] # under each other
 right = ["registers", "stack"] # under each other
 panel = ["info", "terminal"] # next to each other
+
+# Available Panes:
+# control
+# code
+# memory
+# info
+# registers
+# terminal
+# assembly
+# stack

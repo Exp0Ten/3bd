@@ -893,7 +893,10 @@ fn unwind (
         None
     };
 
-    regs.rsp = cfa; // This requires explanation:
+    if CONFIG.access().as_ref().unwrap().feature.as_ref().unwrap().exp_rust_unwind.unwrap() { // FEATURE SETTING
+        regs.rsp = cfa;
+    }
+    // This requires explanation:
 
     /*
     Because Rust creates only some Dwarf data and is not completely supported, it does things quite differently compared to other languages.
@@ -1178,7 +1181,7 @@ impl <'a> TypeDisplay<'a> {
         match self {
             Self::Base(base) => {
                 let slice = constant.to_le_bytes();
-                base.constant_value(&slice, gimli::RunTimeEndian::Little) // because to_BE_bytes()
+                base.constant_value(&slice, gimli::RunTimeEndian::Little) // because to_LE_bytes()
             },
             Self::Pointer(pointer) => {
                 pointer.display(constant)

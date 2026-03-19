@@ -1569,10 +1569,9 @@ fn pane_view_stack<'a>(pane: &'a PaneStack, state: &'a State, id: pane_grid::Pan
         };
     }
 
-
     let content = container(
         scrollable(
-            row![collapse, lines]
+            row![collapse, lines].padding(padding::Padding {bottom: 10., right: 10., ..Default::default()}) // padding for the scrollbars
         ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
         .width(Length::Fill)
         .height(Length::Fill)
