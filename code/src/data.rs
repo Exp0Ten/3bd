@@ -1,7 +1,6 @@
 use std::sync::{Mutex, MutexGuard};
 use std::path;
 use std::fs;
-use std::io::{PipeReader, PipeWriter};
 
 
 use nix::unistd::Pid;

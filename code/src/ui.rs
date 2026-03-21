@@ -979,7 +979,7 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
 
         if state.internal.stopped {
             let mut msg = match state.status.unwrap() {
-                nix::sys::wait::WaitStatus::Signaled(_, signal, core_dump) => format!("Stopped: {signal}"),
+                nix::sys::wait::WaitStatus::Signaled(_, signal, _) => format!("Stopped: {signal}"),
                 _ => "Stopped".to_string()
             };
 
@@ -2194,7 +2194,6 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             let stack = state.internal.pane.stack.as_ref().unwrap();
             stack_open(stack, data, line, true);
         }
-        _ => ()
     };
 }
 

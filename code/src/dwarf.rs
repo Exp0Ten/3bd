@@ -1924,7 +1924,7 @@ pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> {
     let mut decoder = Decoder::with_ip(64, bytes, address, DecoderOptions::NONE);
     let mut formatter = NasmFormatter::new();
 
-    formatter.options_mut().set_digit_separator("_");
+    formatter.options_mut().set_digit_separator("");
     formatter.options_mut().set_first_operand_char_index(4);
 
     let mut instructions = String::new();

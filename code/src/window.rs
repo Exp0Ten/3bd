@@ -1,9 +1,6 @@
 use iced::{
     Element, Theme, Task,
     application, window,
-    widget::{
-        column, stack
-    }
 };
 
 use rfd;
@@ -110,10 +107,6 @@ impl App {
 
     fn theme(&self) -> Theme {
         self.theme.clone()
-    }
-
-    fn settings(&self) -> window::Settings {
-        self.settings.clone()
     }
 }
 

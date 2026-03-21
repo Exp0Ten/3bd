@@ -497,7 +497,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
     match status {
         wait::WaitStatus::Exited(pid, exit) => {
             *task = Some(iced::Task::done(window::Message::Operation(Operation::Reset)));
-            Dialog::warning(&format!("Program exited with the code: {:-}.\nPid: {}", exit, pid), Some("Program exited"));
+            Dialog::info(&format!("Program exited with the code: {:-}.\nPid: {}", exit, pid), Some("Program exited"));
             return;
         },
         wait::WaitStatus::Signaled(pid, signal, _) => {
