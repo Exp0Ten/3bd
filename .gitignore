@@ -1,8 +1,6 @@
 code/target
 code/Cargo.lock
-*.o
-build/tmp
+build/tbd
 /target
-/test/languages/rust/target
-/test/languages/rust/Cargo.lock
-# misc/symbolic # turn on in later releases, used now only for picking the icons
+/test/rust/target
+/test/rust/Cargo.lock

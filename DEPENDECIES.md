@@ -1,5 +1,3 @@
-I did not expect to have dependencies, but i found my first one and so this file was created. Later on I will fix it in a more readable state.
-
 Dependencies and their respective installations :
 
 rustup - for compiling the rust code
@@ -7,9 +5,22 @@ rustup - for compiling the rust code
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-zenity - for message dialogs (technically not necessary)
 
-For Debian an Ubuntu (more on their git repo)
+zenity - for message dialogs (optional)
+
+For Debian an Ubuntu
 ```sh
 sudo apt install zenity
+```
+
+make - for easier building process
+```sh
+sudo apt install make
+```
+Otherwise compile using `cargo build --release` and run using `cargo run --release` inside the `code` dir.
+
+gcc & g++ - for compiling the example codes (c and c++ respectively)
+```sh
+sudo apt install gcc
+sudo apt install g++
 ```

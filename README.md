@@ -1,30 +1,30 @@
 # 3bd
 This is a project of making a user friendly debugger from scratch.
-The name 3bd is an acronym for Three Body Debugger. I had an inspiration from the three body problem in mathematics/physics. However instead of using 3bd every time you would want to run it, instead it uses a acronym "tbd" without the number.
-I also wish to somehow reflect that in the UI feel, however that is a secondary objective.
-My main inspiration was that I have seen very little user friendly debuggers or commercial software in general. I understand that most of these tools have a simple UI to make them version compatible, however I have been very displeased with the looks of most of these apps.
+The name 3bd is an acronym for Three Body Debugger. I had an inspiration from the three body problem in mathematics/physics. However instead of using 3bd every time you would want to run it, it uses the acronym "tbd" without the number.
+My main inspiration was that I have seen very little of user friendly debuggers or commercial software in general. I understand that most of these tools have a simple UI to make them version compatible, however I have been very displeased with the looks of most of these apps.
 
-I have played many puzzle games with programming aspects and loved the UI that was used for debugging or visualizing the software, and was very disappointed to find that commercial software lacks some basic theming options.
-I wish to therefore make it customizable enough and give the user the control over how they use the software. In the end, its just a piece of code running complex algorithms and it'd be sad if someone chose to not use the tools just because of the outlook of the software.
+For example, I tried making the UI as customizable as possible, mainly by using color themes and movable widgets.
 
 ## Code
-Ideally, everything will be written in Rust, as I am a big fan of this language, mainly for its stability and speed.
+This project is written in the Rust programming language.
+All of the source code is in the `code` directory, along with the assets (icons...).
+There is a makefile in `build`, that produces the binary (runs `cargo build --release` and copies the binary to the dir). To install it, either move the executable into the `/bin` directory or add the build folder to your path.
+In `docs` you will find the PDF documents that were used to create this project.
+If you want to try out some of the features, you can use the examples in the `test` folders.
 
 ## Arch
-This project is only for Linux, and limited to the AMD64 (x86_64) architecture (maybe more arches will be possible). I have thought of making this program portable to different architectures using config files that specify the functionality/implementation for the processors, but decided that would be close to impossible.
-The second important thing is supported languages. C and Assembly are a given, as they are essential for general debugging. However, I won't be making language specific profile, meaning you will not be able to debug the languages for mistakes within that language, but only on the general level of runtime. (I am yet to see what the debug symbols tell you, meaning language specific errors might be possible)
-Source code tracking will be a feature though, and I plan on dynamically displaying the variables, maybe linking them as well to the higher level code (like enums). Interpreted languages are unsupported, unless you wanna debug the interpreter.
+This project is only for Linux, and limited to the AMD64 (x86_64) architecture (ARM or x86 might be possible later).
+Works on both X11 and Wayland, was built on the Debian distro, (others are not tested).
+It supports conventionally any compiled programming language that produces the DWARF data (compiling with the -g flag). I cannot guarantee every language will work, as some still dont have complete support of the DWARF standard (like Rust). So be prepared the program might not display all of the data correctly or might crash during loading of the data.
+However, I tested thoroughly on languages C, C++ and Rust. You may also compile your code with the additional optimization flags, like `-Os` and more, and then debug the code. But keep in mind that the debugging data produced will be more limited due to these optimizations and therefore the tracing experience might seem illogical or strange.
+I can process and display only what the debug information tells me.
+
+Interpreted languages are unsupported, unless you want to debug the interpreter. Tracing child programs and threads also isn't supported. And debbuging TUI (Terminal User Interface) apps would display weird outputs in the terminal.
 
 ## Features
-Basic and complete control over the child programs execution.
+Basic and complete control over the execution of the tracee.
 Breakpoints, tracking source and assembly code.
-Dynamically interactive memory reading and label tracking and processing (maybe connecting to varibles and their types).
-Colors and types to make notes or see changes.
-Display of processor state (registers, pointers).
-C and Assembly support (maybe some easy high level code profiling using config files).
-Customizable UI (Displays, Terminal, Controls, Settings) + CLI version, all using config files.
-Complete documentation WITH mentions to the source code.
-
-
-## Disclaimer
-This project is for my finals and therefore I will have to write a lot of the documentation in Czech. I am open to translations, but all of those will be in designated folders.
+Reading memory, with multiple formats of displaying the data.
+Displaying the registers.
+Debugging of C, C++ and Rust files is tested and working.
+Customizable UI (movable and resizable widgets), Sidebars and a Panel (also support for multiple widgets of the same type).
