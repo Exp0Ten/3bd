@@ -352,15 +352,6 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             state.internal.pane.output.push_str(&text);
         },
         Operation::Stack(result) => {
-            match result.clone() {
-                Ok(res) => {
-                    println!("YES");
-                    for i in res {
-                        println!("{} {}", i.0, i.1);
-                    }
-                },
-                Err(()) => println!("NU UH")
-            };
             match result {
                 Ok(stack) => state.internal.pane.stack = Some(stack),
                 Err(()) => {state.internal.pane.stack = None; return;}
@@ -513,7 +504,6 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         Ok(info) => info,
         Err(_) => return
     };
-    println!("{:?}", info);
     match info.si_code {
         TRAP_BRKPT|SI_KERNEL => {
             state.internal.breakpoint = true;

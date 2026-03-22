@@ -575,7 +575,6 @@ fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_re
     // register unwind rules
     let rules = unwind.row.as_ref().unwrap().registers();
     for (reg, rule) in rules { // we iterate through the rules
-        println!("{:?}", reg);
         let value = unwind_register(rule, cfa, regs, eh_frame, encoding);
         match value {
             Ok(value) => *match_register(reg, regs) = value,
@@ -587,7 +586,6 @@ fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_re
 }
 
 fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<u64, ()> {
-    println!("{:?}", register_rule);
     match register_rule {
         gimli::RegisterRule::Offset(addr_offset) => Ok(slice_to_u64(&unwind_memory((cfa as i64 + addr_offset) as u64, 8)?)),
         gimli::RegisterRule::Expression(expression) => {
@@ -654,7 +652,6 @@ fn eval_expression<'a>(
 
     let mut result = evaluation.evaluate().map_err(|_| ())?;
     loop {
-        println!("{:?}", result);
         match result {
             gimli::EvaluationResult::Complete => break,
             gimli::EvaluationResult::RequiresMemory { address, size, .. } => {
@@ -815,8 +812,6 @@ impl Parameter {
 pub fn call_stack<'a>() -> Result<CallStack, ()> {
     let mut call_stack = CallStack::new();
 
-    println!("call");
-
     let mut registers = REGISTERS.access().unwrap();
 
     let ehframe = EHFRAME.access();
@@ -834,13 +829,11 @@ pub fn call_stack<'a>() -> Result<CallStack, ()> {
     );
 
     loop {
-        print!(".");
         if unwind(&mut call_stack, bindings, &mut registers)? {
             break;
         };
     }
 
-    println!("ok");
     Ok(call_stack)
 }
 
@@ -869,40 +862,25 @@ fn unwind (
     // We need info about the function and all
     let (index, _rip)= get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
     //regs.rip = rip;
-    println!("{:?}", index);
-    print!("a");
     let unit = source_map.get(&index.hash_path).unwrap()[index.index].compile_unit; // our function index is unit organised for faster lookup speed. this is possible thanks to the hashmap, which has constant access time, while searching through ranges is linear access time (in the end, this is MUCH faster, especially with more functions and source files)
-    print!("b");
     let function = function_index.get_function(normal(regs.rip), unit).unwrap(); // now we get our function offset into the debug_info_section
-    print!("c");
     let unit_header = dwarf.debug_info.header_from_offset(unit).unwrap();
-    print!("d");
     let dwarf_unit = dwarf.unit(unit_header).unwrap();
 
-    print!("e");
     let offset = function.to_unit_offset(&dwarf_unit).unwrap();
-    print!("f");
     let mut entries = dwarf_unit.entries_at_offset(offset).unwrap();
-    print!("g");
     let _ = entries.next_entry();
-    print!("h");
     let die = entries.current().unwrap();
-    print!("i");
     let (mut function_info, frame_attribute) = extract_function_info(die, &dwarf, &dwarf_unit);
 
-    print!("j");
     function_info.debug_info_offset = Some(function);
 
-    print!("k");
     let unwind_info = get_unwind_for_address(normal(regs.rip), (&gimli_eh_frame, eh_frame));
-    print!("l");
     let encoding = dwarf_unit.encoding();
-    print!("m");
     let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
 
 
 
-    print!("o");
     let frame_base = if frame_attribute.is_some() {
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
         let frame_base = eval_expression(&expression, regs, Some(cfa), None, encoding)?[0];
@@ -944,33 +922,24 @@ fn unwind (
     TLDR: might not work, be careful
     */
 
-    println!("{}\n {:?} {}",cfa, frame_base, regs.rsp);
-
-    print!("p");
     //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
     extract_var(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
 
-    print!("n");
     unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
 
 
-    print!("q");
     if function_info.variables.as_ref().unwrap().len() == 0 { //space opt
         function_info.variables = None
     };
 
-    print!("r");
     if function_info.parameters.as_ref().unwrap().len() == 0 { //space opt
         function_info.parameters = None
     };
 
-    print!("s");
     let main_function = check_for_main(&function_info, eh_frame);
 
-    print!("t");
     call_stack.0.push(function_info);
 
-    print!("u");
     if main_function {return Ok(true);}
 
     Ok(false)
@@ -1039,8 +1008,6 @@ fn extract_var<'a>(
     let parameters = function.parameters.as_mut().unwrap();
 
     loop {
-        println!("{:?}", variables);
-        println!("{:?}", parameters);
         if !first { // Would skip over the first entry otherwise and we dont want that
             match entries.current() {
                 Some(entry) => match entry.tag() {
@@ -1052,7 +1019,6 @@ fn extract_var<'a>(
         } else {
             first = false;
         }
-        println!("{}", entries.depth());
         if fn_depth == entries.depth() { // if the new entry has the same depth as the original fn_depth, then they are siblings and therefore we ran into the end of the function locals definition // we cant just use the null entry, because the some variables can be in deeper lexical fields, so this is the easiest
             return Ok(());
         }
@@ -1095,11 +1061,8 @@ fn extract_var<'a>(
             },
             None => None
         };
-        let constant = match entry.attr(gimli::DW_AT_const_value) {
-            Some(attr) => match attr.udata_value() { // constant values only work for base_types right now
-                Some(val) => Some(val),
-                None => {println!("WTF CONSTANT"); None}
-            },
+        let constant = match entry.attr_value(gimli::DW_AT_const_value) { // constant values only work for base_types right now
+            Some(attr) => Some(number(attr)),
             None => None
         };
 
@@ -1151,9 +1114,8 @@ fn check_for_main(info: &Function, eh_frame: &EhFrame) -> bool { // function bec
     info.debug_info_offset == eh_frame.main
 }
 
-fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<(&SourceIndex, u64), ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n shouldnt get larger than a 1000, which is really fast for me
-    for _ in 0..100000 {
-        println!("{}", rip);
+fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<(&SourceIndex, u64), ()> { // calls are unfortunately outside of the lines addresses, so im using backwards byte search to find the correct address, thankfully this is an O(n) operation, where n is at worst the iteration limit, which is really fast for me
+    for _ in 0..100000 { // iteration limit, in case of some function calls outside of our LINE PROGRAM
         match lines.get_line(rip) {
             Some(index) => return Ok((index, rip)), // We need to return the updated rip, otherwise the framebase and such will be incorrect
             None => ()
@@ -1699,7 +1661,6 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
                 Ok(true) => {
                     let entry = cursor.current().unwrap();
                     if let Some(upper) = entry.attr_value(gimli::DW_AT_upper_bound) {
-                        println!("noo");
                         let upper = number(upper);
                         if let Some(lower) =  entry.attr_value(gimli::DW_AT_lower_bound) {
                             Some(upper-number(lower)+1)
@@ -1707,9 +1668,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
                             Some(upper+1)
                         }
                     } else {
-                        println!("ohhh");
                         if let Some(count) = entry.attr_value(gimli::DW_AT_count) {
-                            println!("{:?}", count);
                             Some(number(count))
                         } else {
                             None
@@ -1718,8 +1677,6 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
                 },
                 _ => None
             };
-
-            println!("{:?}", count);
 
             TypeDisplay::Array(ArrayType {
                 name: name,
@@ -1796,10 +1753,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
             let mut entries = unit.entries_at_offset(type_entry.0).unwrap();
             entries.next_entry().unwrap(); // Stepping into the children
             let mut first = true;
-            println!("YOOO");
             loop {
-                println!("DAMN");
-
                 let current = if first {
                     first = false;
                     if entries.next_entry().unwrap() {
