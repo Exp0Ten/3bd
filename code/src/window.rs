@@ -5,9 +5,16 @@ use iced::{
 
 use rfd;
 
+// internal import
+
 use crate::{
     ui, trace, data::*
 };
+
+
+/// FILE: window.rs - Application MAIN and creating Dialog messages
+
+// STATE OF THE APP
 
 #[derive(Default)]
 pub struct App {
@@ -45,6 +52,8 @@ pub struct PaneData {
     pub unique_stack: u32
 }
 
+// MESSAGES OF THE APP
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Layout(ui::LayoutMessage),
@@ -52,6 +61,8 @@ pub enum Message {
     Operation(trace::Operation),
     None
 }
+
+// MAIN APP RUNTIME LOOP
 
 pub fn run_app() -> iced::Result {
     application("Three Body Debugger", App::update, App::view)
@@ -83,7 +94,7 @@ impl App {
             }
         }
     }
-
+    // MAIN UPDATE FUNCTION
     fn update(&mut self, message: Message) -> Task<Message> {
         let mut task = None;
         let state = &mut self.state;
@@ -96,7 +107,7 @@ impl App {
 
         task.unwrap_or(Task::none())
     }
-
+    // MAIN VIEW FUNCTION
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
 
@@ -110,8 +121,8 @@ impl App {
     }
 }
 
-// DIALOG FUNCTIONS (those small windows when your program encounters an error, or when you wanna pick a file, you absolutely know what i mean just cant remember trust me)
 
+// DIALOG FUNCTIONS (those small windows when your program encounters an error, or when you wanna pick a file, you absolutely know what i mean just cant remember trust me)
 pub struct Dialog; // Struct for dialog functions, and for easy export (i know i could make a module, but i dont wanna flood it with too many files, i already feel like ive got many)
 
 impl Dialog {

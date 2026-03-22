@@ -1,5 +1,6 @@
 /*
-    This is the main file of the entire program
+    FILE: main.rs
+    This is the main file of the entire program, connecting all of its modules
     It loads the config and runs the application
 */
 
@@ -12,11 +13,12 @@ mod ui;         // user interface - communicating with user and graphics
 mod style;      // styling functions
 mod window;     // window handle
 
-// MAIN
-
+// internal import
 use crate::data::*;
+
+/// MAIN
 
 fn main() {
     CONFIG.sets(config::load_config());
-    window::run_app().expect("Not working");
+    window::run_app().expect("Application failed to start");
 }

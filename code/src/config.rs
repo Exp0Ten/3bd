@@ -1,9 +1,14 @@
-use std::fs;
+// toml crate for parsing config.toml
 use toml;
 use serde::Deserialize;
 
+use std::fs;
+
+// internal imports
 use crate::data::*;
 
+
+/// FILE: config.rs - Loading and Handling Configuration data and User Settings
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {

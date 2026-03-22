@@ -1,18 +1,39 @@
-use std::path::PathBuf;
-use std::collections::HashMap;
+use std::{
+    path::PathBuf,
+    collections::HashMap
+};
+
+use gimli::{
+    DebugInfoOffset,
+    UnitHeader,
+    EndianSlice,
+    UnwindSection
+};
+
+use object::{
+    Object,
+    ObjectSection
+};
+
+use iced_x86::{ // Disassembler
+    Decoder,
+    DecoderOptions,
+    Formatter,
+    Instruction,
+    NasmFormatter
+};
 
 
-use gimli::DebugInfoOffset;
-use gimli::UnitHeader;
-use gimli::EndianSlice;
-use gimli::UnwindSection;
+// internal imports
+use crate::{
+    data::*,
+    trace
+};
 
-use object::{Object, ObjectSection};
 
-use crate::data::*;
-use crate::trace;
+/// FILE: dwarf.rs - Loading, parsing and displaying the debbuging data from the DWARF standard, unwinding the STACK and function calls
 
-const NOMASK:u64 = 0xFFFFFFFFFFFFFFFF; // because gimli's builtin function is stupid and i dont want make a new function for it
+const NOMASK: u64 = u64::MAX; // All bits set
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct SourceFile {
@@ -39,7 +60,7 @@ pub type SourceMap = HashMap<PathBuf, Vec<SourceFile>>;
 
 pub trait ImplSourceMap {
     fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<(&SourceFile, usize)>;
-    fn get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf;
+    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf;
     fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex;
     fn index_with_line(&self, line: &SourceIndex) -> &SourceFile;
     fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile;
@@ -57,7 +78,7 @@ impl ImplSourceMap for SourceMap {
         None
     }
 
-    fn get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf {
+    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf {
         PathBuf::from(
             dwarf.unit(
                 source_file.get_unit_header(&dwarf)
@@ -116,7 +137,7 @@ pub type LineAddresses = HashMap<u64, SourceIndex>;
 
 pub trait ImplLineAddresses<'a> {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex>;
-    fn get_source_file(&'a self, address: u64) -> Option<SourceFile>;
+    fn _get_source_file(&'a self, address: u64) -> Option<SourceFile>;
     fn get_address(&'a self, line: &SourceIndex) -> Option<u64>;
 }
 
@@ -129,7 +150,7 @@ impl <'a> ImplLineAddresses<'a> for LineAddresses {
         self.get(&normal(address))
     }
 
-    fn get_source_file(&self, address: u64) -> Option<SourceFile> {
+    fn _get_source_file(&self, address: u64) -> Option<SourceFile> {
         match self.get(&normal(address)) {
             Some(line) => {
                 let bind = SOURCE.access();
@@ -505,7 +526,6 @@ pub fn find_main() -> DebugInfoOffset { // from the symbol, but only if main isn
     function
 }
 
-// STACK UNWINDING
 
 // Struct for returning the context and the row in the FDE
 struct UnwindInfo {
@@ -671,7 +691,9 @@ fn slice_to_u64(slice: &[u8]) -> u64 {
     }
 }
 
+
 // CALL STACK PARSING
+
 #[derive(Debug, Clone)]
 pub struct CallStack (pub Vec<Function>);
 
@@ -845,7 +867,7 @@ fn unwind (
 
 
     // We need info about the function and all
-    let (index, rip)= get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
+    let (index, _rip)= get_next_line(regs.rip, line_addresses)?; // if we arent in a source file, we cannot be debugging the info (can happen using step while stepping into a dynamic library function, and therefore it will not show any of the call stack info, as we have no Dwarf info)
     //regs.rip = rip;
     println!("{:?}", index);
     print!("a");
@@ -1871,7 +1893,6 @@ fn location_memory(location: Location, size: BitByteSize, endian: Endian) -> Res
 
 // CODE DISASSEMBLY
 
-use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, NasmFormatter};
 
 const DEPTH: u64 = 64; // iteration limit
 
@@ -1979,7 +2000,7 @@ pub fn anti_normal(address: u64) -> u64 {
     }
 }
 
-fn get_unit_entry_offset(offset: DebugInfoOffset, dwarf: &Dwarf) -> (gimli::UnitOffset, DebugInfoOffset) { //unit offset AND the offset of the Unit
+fn get_unit_entry_offset(offset: DebugInfoOffset, dwarf: &Dwarf) -> (gimli::UnitOffset, DebugInfoOffset) { // unit offset AND the offset of the Unit
     let mut units = dwarf.units();
     while let Some(unit) = units.next().unwrap() {
         match offset.to_unit_offset(&unit) {
@@ -1987,8 +2008,10 @@ fn get_unit_entry_offset(offset: DebugInfoOffset, dwarf: &Dwarf) -> (gimli::Unit
             _ => ()
         };
     }
-    panic!(); // how did you get this far yk
+    panic!(); // in case it fails, meaning there is an error with the dwarf data OR an error on my side
 }
+
+// Attribute Value, interpretation
 
 fn string<'a>(attr: gimli::AttributeValue<EndianSlice<'a, Endian>>, dwarf: &'a Dwarf) -> &'a str {
     match attr {
@@ -2014,7 +2037,7 @@ fn number(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>) -> u64 {
 fn encoding(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>) -> gimli::DwAte {
     match attr {
         gimli::AttributeValue::Encoding(e) => e,
-        _ => unimplemented!()
+        _ => unimplemented!() // dont call encoding on a non encoding attribute
     }
 }
 
@@ -2025,6 +2048,8 @@ fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &
         _ => DebugInfoOffset(0)
     }
 }
+
+// Creating numbers from bytes
 
 trait FromBytes<const N: usize> {
     fn from_bytes(bytes: &[u8], endian: Endian) -> Self;
@@ -2048,12 +2073,12 @@ macro_rules! impl_from_bytes {
                         Endian::Big => {
                             let mut vec = Vec::from(bytes);
                             add.append(&mut vec);
-                            add.try_into().expect("OMGGGG")
+                            add.try_into().unwrap()
                         }
                         Endian::Little => {
                             let mut vec = Vec::from(bytes);
                             vec.append(&mut add);
-                            vec.try_into().expect("OMGGGG")
+                            vec.try_into().unwrap()
                         }
                     }
                 }

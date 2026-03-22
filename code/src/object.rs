@@ -1,20 +1,34 @@
-use std::path::Path;
-use std::process;
-use std::process::Stdio;
-use std::os::unix::{process::CommandExt, fs::MetadataExt};
+use std::{
+    fs,
+    path::Path,
+    process::{
+        self,
+        Stdio
+    },
+    os::unix::{
+        process::CommandExt,
+        fs::MetadataExt
+    },
+    io::Read
+};
+
+use nix::{
+    sys::ptrace,
+    pty,
+    unistd::{
+        fork,
+        ForkResult
+    }
+};
+
+// internal import
+use crate::{
+    data::*,
+    window::Dialog
+};
 
 
-use std::fs;
-
-use std::io::{Read};
-
-use nix::sys::ptrace;
-use nix::pty;
-use nix::unistd::{fork, ForkResult};
-
-use crate::window::Dialog;
-use crate::data::*;
-
+/// FILE: object.rs - Managing communication with the filesystem
 
 pub fn run_tracee(file: &Path, args: Vec<String>, slave: Option<std::os::fd::OwnedFd>) -> Result<i32, ()> {
 

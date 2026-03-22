@@ -1,26 +1,55 @@
 use iced::{
-    Task, Length,
+    Task,
+    Length,
     widget::{
-        Container, Row, Theme,
-        button, column, container, pane_grid, row, svg, text,
-        svg::Handle, pick_list, scrollable, text_input, mouse_area
+        Container,
+        Row,
+        Theme,
+        svg::Handle,
+        text,
+        container,
+        button,
+        column,
+        row,
+
+        svg,
+        pane_grid,
+        pick_list,
+        scrollable,
+        text_input,
+        mouse_area
     },
-    padding, font
+    padding,
+    font
 };
 
-use std::path::PathBuf;
-use std::io::Write;
+use std::{
+    path::PathBuf,
+    io::Write
+};
 
 use nix::sys::signal::Signal;
 
+// internal import
 use crate::{
-    window::*, data::*, trace::*, style, config, dwarf::*, object
+    window::*,
+    data::*,
+    trace::*,
+    dwarf::*,
+    style,
+    config,
+    object
 };
 
+
+// FILE: ui.rs - Creating and Handling the user interface and graphics
+
+// Fonts
 const EXTRABOLD: font::Font = font::Font {weight: font::Weight::ExtraBold, ..font::Font::DEFAULT};
 const BOLD: font::Font = font::Font {weight: font::Weight::Bold, ..font::Font::DEFAULT};
-const SIDERATIO: f32 = 0.25; // (0.1; 0.4)
 
+// PaneGrid Layout
+const SIDERATIO: f32 = 0.25; // (0.1; 0.4)      // Default ratio of sidebars
 
 pub struct Layout {
     status_bar: bool,
@@ -458,6 +487,7 @@ impl Layout {
     }
 
     fn get_nodes(&self) -> (pane_grid::Node, Option<(pane_grid::Node, f32)>, Option<(pane_grid::Node, f32)>, Option<(pane_grid::Node, f32)>) { //main, panel, letf, right
+        #[allow(unused_assignments)]
         let mut main = None;
         let mut left = None;
         let mut right = None;
@@ -660,7 +690,7 @@ impl Layout {
     fn node_to_configuration(&self, node: &pane_grid::Node) -> pane_grid::Configuration<Pane> { // a recursive function, as this is the easiest way, also, its only for the row structures so its actually pretty easy
         match node {
             pane_grid::Node::Pane(pane) => pane_grid::Configuration::Pane(self.panes.get(*pane).unwrap().clone()), //retrive the state of the pane
-            pane_grid::Node::Split { id, axis, ratio, a, b } => {
+            pane_grid::Node::Split { id: _, axis, ratio, a, b } => {
                 pane_grid::Configuration::Split {
                     axis: *axis,
                     ratio: *ratio,
@@ -672,55 +702,19 @@ impl Layout {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum Base {
-    #[default]
-    Hex,
-    Dec,
-    Oct,
-    Bin,
-}
-
-impl Base {
-    pub fn form(&self, num: u64) -> String {
-        match self {
-            Self::Hex => format!("0x{:x}", num),
-            Self::Dec => format!("{}", num),
-            Self::Oct => format!("0o{:o}", num),
-            Self::Bin => format!("0b{:b}", num),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum ByteBase {
-    #[default]
-    Hex,
-    Dec,
-    Chr
-}
-
-impl ByteBase {
-    fn form(&self, num: u8) -> String {
-        match self {
-            Self::Hex => format!("{:02x}", num),
-            Self::Dec => format!("{}", num),
-            Self::Chr => format!("{}", if num.is_ascii_graphic() {(num as char).to_string()} else {if num == 0x20 {"' '"} else {"'.'"}.to_string()}),
-        }
-    }
-}
+// Panes and view functions
 
 #[derive(Debug, Clone)]
-pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window) (they will have their own structs if they need)
-    Memory(PaneMemory),
-    Stack(PaneStack),
-    Code(PaneCode),
-    Assembly(PaneAssembly),
-    Registers(PaneRegisters),
-    Info, // ELF dump
+pub enum Pane { // Generic enum for all bars (completed widgets that can be moved around inside a window)
     Control(PaneControl),
+    Registers(PaneRegisters),
+    Memory(PaneMemory),
+    Code(PaneCode),
+    Info, // ELF dump
     Terminal(PaneTerminal),
-    _Empty //just in case
+    Stack(PaneStack),
+    Assembly(PaneAssembly),
+    _Empty
 }
 
 impl Pane {
@@ -760,12 +754,252 @@ impl Pane {
             _ => panic!()
         }
     }
-    fn assembly(&mut self) -> &mut PaneAssembly {
-        match self {
-            Pane::Assembly(inner) => inner,
-            _ => panic!()
+}
+
+
+#[derive(Debug, Clone, Default)]
+pub struct PaneControl {
+    selected_signal: Option<Signal>,
+}
+impl PaneControl {
+    fn view<'a>(&self, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+        let size = 30;
+
+        let file = FILE.access().is_some();
+        let run = PID.access().is_some();
+        let stopped = state.internal.stopped;
+
+        let start_stop = if run {
+            svg_button("icons/stop.svg", size, Some(style::widget_svg))
+            .style(style::widget_button)
+            .on_press(Message::Operation(Operation::StopTracee))
+        } else {
+            svg_button("icons/run.svg", size, Some(if file {style::widget_svg} else {style::button_svg_disabled}))
+            .style(style::widget_button)
+            .on_press_maybe(if file {Some(Message::Operation(Operation::RunTracee))} else {None})
+        };
+
+        let pause_cont = if stopped {
+            svg_button("icons/continue.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+            .on_press_maybe(if run {Some(Message::Operation(Operation::Continue))} else {None})
+            .style(style::widget_button)
+        } else {
+            svg_button("icons/pause.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+            .on_press_maybe(if run {Some(Message::Operation(Operation::Pause))} else {None})
+            .style(style::widget_button)
+        };
+
+        let step = svg_button("icons/step.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
+        .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
+        .style(style::widget_button);
+
+        let source_step = svg_button(
+            "icons/source_step.svg",
+            size, 
+            Some(
+                if stopped & !state.internal.no_debug & state.last_signal.is_none() {style::widget_svg}
+                else {style::button_svg_disabled}
+            )
+        ).on_press_maybe(
+            if stopped & !state.internal.no_debug & state.last_signal.is_none() {
+                Some(Message::Operation(Operation::SourceStep))
+            } else {None}
+        ).style(style::widget_button);
+
+        let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
+        .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
+        .style(style::widget_button);
+
+        let signal = svg_button("icons/signal.svg", size, Some(if self.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
+        .on_press_maybe(if self.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(self.selected_signal.unwrap())))} else {None})
+        .style(style::widget_button);
+
+        let signals = [
+            Signal::SIGKILL,
+            Signal::SIGINT,
+            Signal::SIGQUIT,
+            Signal::SIGHUP,
+            Signal::SIGTRAP,
+            Signal::SIGCONT,
+            Signal::SIGABRT,
+            Signal::SIGFPE,
+            Signal::SIGUSR1,
+            Signal::SIGUSR2,
+            Signal::SIGSEGV,
+            Signal::SIGTERM,
+            Signal::SIGCHLD,
+            Signal::SIGSTOP,
+            Signal::SIGTSTP,
+        ];
+
+        let select = pick_list(signals, self.selected_signal, move |signal| Message::Pane(PaneMessage::ControlSelectSignal(id, signal)))
+        .placeholder("Signal...");
+
+        let content = container(row![
+            start_stop,
+            pause_cont,
+            step,
+            source_step,
+            kill,
+            signal,
+            select
+        ].padding(3)).style(style::back).width(Length::Fill);
+        content
+}
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PaneRegisters {
+    format: Base
+}
+impl PaneRegisters {
+    fn view<'a>(&self, id: pane_grid::Pane) -> Container<'a, Message> {
+
+        fn flags(num: u64) -> String {
+            let of = if num & (1 << 11) != 0 {"|OF"} else {""};
+            let df = if num & (1 << 10) != 0 {"|DF"} else {""};
+            let sf = if num & (1 << 7)  != 0 {"|SF"} else {""};
+            let zf = if num & (1 << 6)  != 0 {"|ZF"} else {""};
+            let af = if num & (1 << 4)  != 0 {"|AF"} else {""};
+            let pf = if num & (1 << 2)  != 0 {"|PF"} else {""};
+            let cf = if num & (1)       != 0 {"|CF"} else {""};
+            let mut display = format!("{}{}{}{}{}{}{}", of, df, sf, zf, af, pf, cf);
+            if display.len() > 0 {
+                display.push('|');
+            };
+            display
         }
+
+        let size = 30;
+
+        let button_hex: button::Button<'_, Message> = button(
+            text("0x").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == Base::Hex {style::widget_text_toggled} else {style::widget_text})
+        ).padding(0)
+        .height(size)
+        .width(size)
+        .style(if self.format == Base::Hex {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Hex)));
+
+        let button_dec: button::Button<'_, Message> = button(
+            text("10").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == Base::Dec {style::widget_text_toggled} else {style::widget_text})
+        ).padding(4)
+        .height(size)
+        .width(size)
+        .style(if self.format == Base::Dec {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Dec)));
+
+        let button_oct: button::Button<'_, Message> = button(
+            text("0o").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == Base::Oct {style::widget_text_toggled} else {style::widget_text})
+        ).padding(4)
+        .height(size)
+        .width(size)
+        .style(if self.format == Base::Oct {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Oct)));
+
+        let button_bin: button::Button<'_, Message> = button(
+            text("0b").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == Base::Bin {style::widget_text_toggled} else {style::widget_text})
+        ).padding(4)
+        .height(size)
+        .width(size)
+        .style(if self.format == Base::Bin {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Bin)));
+
+        let regs = REGISTERS.access().clone();
+
+        let (reg, value) = match regs {
+            Some(regs) => ([
+                "RIP:",
+                "RAX:",
+                "RBX:",
+                "RCX:",
+                "RDX:",
+                "RSI:",
+                "RDI:",
+                "RBP:",
+                "RSP:",
+                "R8:",
+                "R9:",
+                "R10:",
+                "R11:",
+                "R12:",
+                "R13:",
+                "R14:",
+                "R15:",
+                "RFS:",
+                "CS:",
+                "SS:",
+                "DS:",
+                "ES:",
+                "FS:",
+                "GS:",
+                "FSB:",
+                "GSB:"
+            ], [
+            regs.rip,
+            regs.rax,
+            regs.rbx,
+            regs.rcx,
+            regs.rdx,
+            regs.rsi,
+            regs.rdi,
+            regs.rbp,
+            regs.rsp,
+            regs.r8,
+            regs.r9,
+            regs.r10,
+            regs.r11,
+            regs.r12,
+            regs.r13,
+            regs.r14,
+            regs.r15,
+            regs.eflags,
+            regs.cs,
+            regs.ss,
+            regs.ds,
+            regs.es,
+            regs.fs,
+            regs.gs,
+            regs.fs_base,
+            regs.gs_base
+            ]),
+            None => return program_message("Start the program to display registers.")
+        };
+
+        let mut counter = 0;
+
+        let reg_lines = column(reg.map(|name| text(name).center().size(18).wrapping(text::Wrapping::None).into()));
+        let value_lines = column(value.map(|num|
+            if counter == 17 { // display flags next to the RFLAGS register
+                counter += 1;
+                text(format!("{}   {}", self.format.form(num), flags(num)))
+                .center()
+                .size(18)
+                .style(style::widget_text)
+                .wrapping(text::Wrapping::None)
+                .into()
+            } else {
+                counter += 1;
+                text(self.format.form(num))
+                .center()
+                .size(18)
+                .style(style::widget_text)
+                .wrapping(text::Wrapping::None)
+                .into()
+            }
+        )).clip(true);
+
+
+        let content = container(column![
+            row![button_hex, button_dec, button_oct, button_bin].padding(3).spacing(3),
+            scrollable(row![reg_lines, value_lines].padding(5).spacing(10)).width(Length::Fill).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new().scroller_width(0).width(0) })
+        ]).style(style::back);
+        content
     }
+
 }
 
 #[derive(Debug, Clone, Default)]
@@ -773,17 +1007,158 @@ pub struct PaneMemory {
     pub field: String,
     incorrect: bool,
     pub address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
-    read_address: u64, // where are we in memory, we read extra 2KB around this area and store to global data, and update only when we get outside of this region, for read effectivity
-    data: Vec<u8>,
+    read_address: u64, // the actual address of the last read
+    data: Vec<u8>, // the 4KB of data
     more_bytes: bool, // 4 or 8
     format: ByteBase,
     read_error: bool // if read error occurs, show a button to take the user back (resets the address to a correct map)
 }
+impl PaneMemory {
+    fn view<'a>(&'a self, id: pane_grid::Pane) -> Container<'a, Message> {
+        if MEMORY.access().is_none() {
+            return program_message("Start the program to display memory.");
+        };
 
-#[derive(Debug, Clone, Default)]
-struct PaneStack {
-    open: Vec<bool>,
-    unique: u32 // id of the last update (in order to reload the open vec)
+        let size = 30;
+
+        let button_hex: button::Button<'_, Message> = button(
+            text("0x").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == ByteBase::Hex {style::widget_text_toggled} else {style::widget_text})
+        ).padding(0)
+        .height(size)
+        .width(size)
+        .style(if self.format == ByteBase::Hex {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Hex)));
+
+        let button_dec: button::Button<'_, Message> = button(
+            text("10").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == ByteBase::Dec {style::widget_text_toggled} else {style::widget_text})
+        ).padding(0)
+        .height(size)
+        .width(size)
+        .style(if self.format == ByteBase::Dec {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Dec)));
+
+        let button_chr: button::Button<'_, Message> = button(
+            text("A").center().font(EXTRABOLD).size(size - 12)
+            .style(if self.format == ByteBase::Chr {style::widget_text_toggled} else {style::widget_text})
+        ).padding(0)
+        .height(size)
+        .width(size)
+        .style(if self.format == ByteBase::Chr {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Chr)));
+
+        let bytesize: button::Button<'_, Message> = button(
+            text(if self.more_bytes {"8"} else {"4"}).center().size(size - 12).style(style::widget_text)
+        )
+        .padding(0)
+        .height(size)
+        .width(size)
+        .style(style::widget_button)
+        .on_press(Message::Pane(PaneMessage::MemoryToggleSize(id)));
+
+        let address: text_input::TextInput<'_, Message> = text_input("0x...", &self.field)
+        .on_input(move |data| Message::Pane(PaneMessage::MemoryInput(id, data)))
+        .on_submit(Message::Pane(PaneMessage::MemorySubmit(id)))
+        .on_paste(move |data| Message::Pane(PaneMessage::MemoryPaste(id, data)))
+        .size(size - 12)
+        .line_height(iced::Pixels(size as f32 - 10.))
+        .width(Length::Fill)
+        .style(|theme, status| style::address(theme, status, self.incorrect));
+
+        let field = row![
+            text("Address:").size(size - 12).center().height(size),
+            container(mouse_area(address).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, 1)))).width(Length::FillPortion(4)),
+            widget_fill(),
+            button_hex,
+            button_dec,
+            button_chr,
+            bytesize
+        ].spacing(2).padding(3).height(Length::Shrink);
+
+        let test = match test_memory(self.address) {
+            Err(test) => test,
+            Ok(()) => false
+        };
+
+        let memory = if test {
+            container(column![
+                text("Read out of memory map bounds.").width(Length::Fill).center().style(style::error),
+                container(button(text("Reload to begining of program map")).on_press(Message::Pane(PaneMessage::MemoryReset(id)))).width(Length::Fill).center_x(Length::Fill)
+            ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
+        } else {
+            let data: &Vec<u8>= &self.data;
+
+            let mut addresses: Vec<u64> = Vec::new();
+            let mut bytes: Vec<Vec<u8>> = if self.more_bytes {
+                vec![Vec::new(); 8]
+            } else {
+                vec![Vec::new(); 4]
+            };
+
+            let len = bytes.len();
+            let mut pointer = self.address - self.address % len as u64;
+            let start = pointer - self.read_address;
+
+            for (i, byte) in data[start as usize..].iter().enumerate() {
+                if i % len == 0 {
+                    addresses.push(pointer);
+                    pointer += len as u64;
+                };
+
+                bytes[i % len].push(*byte);
+                if i == 40*len - 1 { // 40 lines
+                    break;
+                }
+            };
+
+            let size = 25;
+
+            let address_column: iced::widget::Column<'_, Message> = column(
+                addresses.iter().map(|addr| text(
+                    format!("0x{:06x}", addr)
+                ).size(size - 5)
+                .height(size)
+                .center()
+                .style(style::weak)
+                .into())
+            );
+
+            let byte_columns: iced::widget::Row<'_, Message> = row(bytes.iter().map(|col| column(
+                col.iter().map(|byte| text(
+                    self.format.form(*byte)
+                ).size(size - 5)
+                .height(size)
+                .center()
+                .style(style::widget_text)
+                .into())
+            ).align_x(iced::Alignment::Center)
+            .width(match self.format {
+                ByteBase::Chr => Length::Fixed(20 as f32),
+                _ => Length::Shrink
+            })
+            .into())
+            ).spacing(match self.format {
+                ByteBase::Hex => 10,
+                ByteBase::Chr => 10,
+                ByteBase::Dec => 15
+            });
+
+            container(mouse_area(
+                row![address_column, byte_columns]
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .padding(5)
+                .spacing(20)
+            ).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, -3))))
+        };
+
+        let content = container(column![
+            field,
+            memory
+        ]).style(style::back);
+        content
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -795,7 +1170,128 @@ pub struct PaneCode {
     scrollable: scrollable::Id,
     viewport: Option<scrollable::Viewport>
 }
+impl PaneCode {
+    fn view<'a>(&self, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+        if state.internal.no_debug {
+            return program_message("No debugging informatio")
+        }
 
+        let size = 30;
+
+        let update_button = svg_button(
+            "icons/view.svg",
+            size,
+            Some(if self.update {style::widget_svg_toggled} else {style::widget_svg}))
+        .style(if self.update {style::widget_button_toggled} else {style::widget_button})
+        .on_press(Message::Pane(PaneMessage::CodeToggleUpdate(id)));
+
+        let bind = SOURCE.access();
+        if bind.is_none() {
+            if state.internal.no_debug {
+                return program_message("No debugging information present in the file.");
+            }
+            return program_message("Load the program to display source code.");
+        };
+
+        let source = bind.clone().unwrap();
+
+        let mut dirs: Vec<String> = source.keys().map(|path| String::from(path.to_str().unwrap())).collect();
+        dirs.sort();
+        dirs.dedup();
+
+        let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs.clone(), self.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
+
+        let mut files: Vec<String> = source[&PathBuf::from(self.dir.clone().unwrap_or(dirs[0].clone()))].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
+        files.sort();
+        files.dedup();
+
+        let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, self.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
+
+        let code = if self.dir.is_some() {match &self.file {
+            Some(file) => {
+                let comp_path = PathBuf::from(self.dir.as_ref().unwrap());
+                let file_path = PathBuf::from(file);
+                let code = self.code_display(comp_path, file_path, source, &state.internal.pane.file);
+                if code.is_ok() {
+                    container(scrollable(
+                    code.unwrap()
+                    ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+                    .height(Length::Fill)
+                    .width(Length::Fill)
+                    .id(self.scrollable.clone())
+                    .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view))))
+                } else {
+                    program_message("File contents not loaded.")
+                }
+            },
+            None => program_message("File not selected.").into()
+        }} else {
+            program_message("Directory not selected.").into()
+        };
+
+        container(
+            column![
+                row![hash_list, file_list, widget_fill(), update_button].spacing(10).padding(3).height(size+6),
+                code
+            ]
+        ).style(style::back)
+    }
+
+    fn code_display<'a>(&self, comp_path: PathBuf, file_path: PathBuf, source: SourceMap, line: &Option<SourceIndex>) -> Result<Row<'a, Message>, ()> {
+
+        let (file, _index) = match source.get_file(comp_path.clone(), file_path.clone()) {
+            Some(file) => file,
+            None => return Err(())
+        };
+        if file.content.is_none() {
+            return Err(())
+        }
+
+        let size = 25;
+
+        let mut lines = Vec::new();
+        let breakpoints = column(
+            self.breakpoints.iter().enumerate().map(|(index, address)| {
+                lines.push(index);
+                breakpoint_button(*address, size).into()
+            })
+        );
+
+        let highlight = match line {
+            Some(index) => {
+                let real_name = &source.index_with_line(index).path;
+                if index.hash_path == comp_path && file_path == *real_name {
+                    index.line
+                } else {
+                    0
+                }
+            },
+            None => 0
+        };
+
+        let line_number = column(
+            lines.iter().map(|num|
+                if highlight as usize == *num+1  {
+                    text(num + 1).style(style::line).font(BOLD)
+                } else {
+                    text(num + 1).style(style::weak)
+                }.size(size-8).height(size).center().into()
+            )
+        ).width(Length::Shrink).align_x(iced::Right);
+
+        let text = text(file.content.clone().unwrap()).size(size-8)
+        .line_height(text::LineHeight::Absolute(iced::Pixels(size as f32)))
+        .wrapping(text::Wrapping::None);
+
+        Ok(row![
+            breakpoints, line_number, container("").width(5), text
+        ].spacing(0)
+        .padding(5))
+    }
+
+
+
+}
 impl Default for PaneCode {
     fn default() -> Self {
         Self {
@@ -809,34 +1305,301 @@ impl Default for PaneCode {
     }
 }
 
-#[derive(Debug, Clone)]
-struct PaneAssembly {
-    scrollable: scrollable::Id
+struct PaneInfo;
+impl PaneInfo {
+    fn view<'a>() -> Container<'a, Message> {
+    let bind = EHFRAME.access();
+    if bind.is_none() {
+        return program_message("Load the program to display ELF info.");
+    };
+    let file = match &bind.as_ref().unwrap().object {
+        ::object::File::Elf64(elf) => elf,
+        _ => panic!()
+    };
+
+    let elf_header = file.elf_header();
+    let info = [
+        ("Class:", InfoNamed::class(elf_header.e_ident.class)),
+        ("Data:", InfoNamed::data(elf_header.e_ident.data)),
+        ("Version:", &elf_header.e_ident.version.to_string()),
+        ("OS/ABI", InfoNamed::os(elf_header.e_ident.os_abi)),
+        ("ABI Version:", &elf_header.e_ident.abi_version.to_string()),
+        ("Type:", InfoNamed::typ(elf_header.e_type.get(file.endian()))),
+        ("Machine:", InfoNamed::machine(elf_header.e_machine.get(file.endian()))),
+        ("Entry point address:", &format!("0x{:x}", elf_header.e_entry.get(file.endian()))),
+        ("Program headers:", &format!("{} (offset into the file)", elf_header.e_phoff.get(file.endian()))),
+        ("Section headers:", &format!("{} (offset into the file)", elf_header.e_shoff.get(file.endian()))),
+    ];
+
+    let size = 20;
+
+    let field = column(info.iter().map(|(field, _)| {
+        text(field.to_string()).size(size-5).center().height(size).wrapping(text::Wrapping::None).into()
+    }));
+
+    let value = column(info.iter().map(|(_, value)| {
+        text(value.to_string()).size(size-5).center().height(size).style(style::widget_text).wrapping(text::Wrapping::None).into()
+    }));
+
+    let data = row![
+        field, value
+    ].padding(5).spacing(30);
+
+    container(
+        data
+    ).width(Length::Fill).height(Length::Fill).style(style::back)
+}
+}
+struct InfoNamed;
+impl InfoNamed {
+    fn class(x: u8) -> &'static str {
+        match x {
+            1 => "ELF32",
+            2 => "ELF64",
+            _ => "Invalid Class"
+        }
+    }
+
+    fn data(x: u8) -> &'static str {
+        match x {
+            1 => "Little Endian",
+            2 => "Big Endian",
+            _ => "Unknown"
+        }
+    }
+
+    fn os(x: u8) -> &'static str {
+        match x {
+            0 => "System V",
+            1 => "HP-UX",
+            2 => "NetBSD",
+            3 => "Linux",
+            4 => "GNU Hurd", // I did not miss 5, 5 is reserved :D
+            6 => "Solaris",
+            7 => "AIX",
+            8 => "IRIX",
+            9 => "FreeBSD",
+            10 => "Tru64",
+            11 => "Novell Modesto",
+            12 => "OpenBSD",
+            13 => "OpenVMS",
+            14 => "NonStop Kernel",
+            15 => "AROS",
+            16 => "FenixOS",
+            17 => "Nuxi CloudABI",
+            18 => "Stratus Technologies OpenVOS",
+            _ => "Unknow OS"
+        }
+    }
+
+    fn typ(x: u16) -> &'static str {
+        match x {
+            1 => "REL (Relocatable file)",
+            2 => "EXEC (Executable file)",
+            3 => "DYN (Position-independent exec)",
+            4 => "CORE (Core file.)",
+            0xFE00|
+            0xFEFF|
+            0xFF00|
+            0xFFFF => "Reserved.",
+            _ => "Unknown Type"
+        }
+    }
+
+    fn machine(x: u16) -> &'static str { // im using abbreviated names for simplicity
+        match x {
+            0 => "Unspecified",
+            1 => "AT&T",
+            0x02 => "SPARC",
+            0x03 => "x86",
+            0x06 => "Intel",
+            0x3e => "AMD x86-64",
+            _ => "Unknown or Unsupported Machine" // My program really supports only x86-64 so I dont have to write them out now
+        }
+    }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PaneTerminal {
+    input: String
+}
+impl PaneTerminal {
+    fn view<'a>(&self, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+        let size = 20;
+
+        if PID.access().is_none() {
+            return program_message("Start the program to display the terminal.");
+        }
+
+        if STDIO.access().is_none() {
+            return program_message("Terminal is set to external.");
+        }
+
+        let input = text_input("Input...", &self.input)
+        .size(size-5).line_height(iced::Pixels(size as f32))
+        .on_input(move |text| Message::Pane(PaneMessage::TerminalType(id, text)))
+        .on_paste(move |text| Message::Pane(PaneMessage::TerminalPaste(id, text)))
+        .on_submit(Message::Pane(PaneMessage::TerminalSend(id)));
+
+        let output = container(
+            scrollable(
+                text(format!("{}_", state.internal.pane.output)).size(size-5).line_height(0.95)
+            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+            .anchor_bottom()
+            .anchor_left()
+            .height(Length::Fill)
+            .width(Length::Fill)
+        ).padding(5)
+        .style(style::terminal);
+
+
+        container(column![
+            output,
+            input
+        ].spacing(5)).style(style::back).padding(2)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PaneStack {
+    open: Vec<bool>,
+    unique: u32 // id of the last update (in order to reload the open vec)
+}
+impl PaneStack {
+    fn view<'a>(&self, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
+        let stack = match &state.internal.pane.stack {
+            Some(stack) => stack,
+            None => if PID.access().is_some() {
+                return program_message("Stack data not loaded")
+            } else {
+                return program_message("Start the program to display stack data.")
+            }
+        };
+
+        if self.unique != state.internal.pane.unique_stack {
+            return container(column![
+                text("Old Stack Data").width(Length::Fill).center(),
+                container(button(text("Update Stack")).on_press(Message::Pane(PaneMessage::StackUpdate(id)))).width(Length::Fill).center_x(Length::Fill)
+            ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
+        };
+
+        let size: u16 = 23;
+
+        let open_vec = &self.open;
+
+        let mut collapse = column![].width(size);
+        let mut lines = column![];
+
+        for (i, open) in open_vec.iter().enumerate() {
+            if !open {continue;}
+            let (depth, line) = &stack[i];
+            let data = if *depth == 0 {
+                text(line).style(style::widget_text)
+            } else {
+                text(line)
+            }.height(size).size(size-5);
+            lines = lines.push(
+                container(data)
+                .padding(padding::left(size*depth.checked_sub(1).unwrap_or(0) as u16)) // removing the indent on the closing brackets of params, while keeping correct collapse rules
+            );
+            match stack.get(i+1) {
+                Some((next_depth, _)) => if next_depth > depth {
+                    collapse = collapse.push(Self::collapse_button(open_vec[i+1], i, size, id));
+                } else {
+                    collapse = collapse.push(container("").height(size));
+                }
+                None => ()
+            };
+        }
+
+        let content = container(
+            scrollable(
+                row![collapse, lines].padding(padding::Padding {bottom: 10., right: 10., ..Default::default()}) // padding for the scrollbars
+            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+            .width(Length::Fill)
+            .height(Length::Fill)
+        ).style(style::back);
+        content
+    }
+
+    fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane) -> button::Button<'a, Message> {
+        if open {
+            svg_button("icons/collapse.svg", size, Some(style::collapse_svg))
+            .on_press(Message::Pane(PaneMessage::StackCollapse(id, index)))
+        } else {
+            svg_button("icons/pane_terminal.svg", size, Some(style::collapse_svg_toggled))
+            .on_press(Message::Pane(PaneMessage::StackExpand(id, index)))
+        }.style(style::breakpoint)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PaneAssembly {
+    scrollable: scrollable::Id
+}
+impl PaneAssembly {
+    fn view<'a>(&self, state: &'a State, _id: pane_grid::Pane) -> Container<'a, Message> {
+        if PID.access().is_none() {
+            return program_message("Start the program to display assembly instructions.");
+        }
+
+        let size = 30;
+
+        let rip = REGISTERS.access().unwrap().rip;
+
+        let assembly = if let Some(assembly) = &state.internal.pane.assembly {
+            let breakpoints = column(
+                assembly.addresses.iter().map(|address| 
+                    breakpoint_button(Some(normal(*address)), size-5).into()
+                )
+            );
+
+            let addresses = column(
+                assembly.addresses.iter().map(|address|
+                    if address == &rip {
+                        text(format!("0x{:06x}", address)).style(style::line).font(BOLD)
+                    } else {
+                        text(format!("0x{:06x}", address)).style(style::weak)
+                    }.size(size-12).center().height(size-5).into()
+                )
+            );
+
+            let bytes = text(&assembly.bytes)
+            .size(size-12).line_height(iced::Pixels((size-5) as f32));
+
+            let instructions = text(&assembly.text)
+            .size(size-12).line_height(iced::Pixels((size-5) as f32));
+
+            scrollable(
+                row![
+                    breakpoints,
+                    addresses,
+                    container("").width(10),
+                    bytes,
+                    container("").width(10),
+                    instructions
+                ]
+            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+            .id(self.scrollable.clone())
+            .height(Length::Fill)
+            .width(Length::Fill)
+        } else {
+            return program_message("Assembly not loaded.")
+        };
+        container(
+            assembly
+        ).style(style::back)
+    }
+}
 impl Default for PaneAssembly {
     fn default() -> Self {
         Self { scrollable: scrollable::Id::unique() }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct PaneRegisters {
-    format: Base
-}
-
-#[derive(Debug, Clone, Default)]
-struct PaneControl {
-    selected_signal: Option<Signal>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct PaneTerminal {
-    input: String
-}
 
 #[derive(Debug, Clone)]
-pub enum LayoutMessage {
+pub enum LayoutMessage { // Messages regarding the PaneGrid
     SidebarLeftToggle,
     SidebarRightToggle,
     PanelToggle,
@@ -846,11 +1609,19 @@ pub enum LayoutMessage {
 }
 
 #[derive(Debug, Clone)]
-pub enum PaneMessage {
+pub enum PaneMessage { // Messages regarding the Panes themselves
     // Control
     ControlSelectSignal(pane_grid::Pane, Signal),
     // Registers
     RegistersChangeFormat(pane_grid::Pane, Base),
+    // Memory
+    MemoryChangeFormat(pane_grid::Pane, ByteBase),
+    MemoryToggleSize(pane_grid::Pane),
+    MemoryInput(pane_grid::Pane, String),
+    MemorySubmit(pane_grid::Pane),
+    MemoryPaste(pane_grid::Pane, String),
+    MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), // the i8 is as a signed multiplier (eg. scroll by how much per scroll)
+    MemoryReset(pane_grid::Pane),
     // Code
     CodeSelectDir(pane_grid::Pane, String),
     CodeSelectFile(pane_grid::Pane, String),
@@ -858,25 +1629,19 @@ pub enum PaneMessage {
     CodeBreakpoints(pane_grid::Pane, Vec<Option<u64>>),
     CodeToggleUpdate(pane_grid::Pane),
     CodeScroll(pane_grid::Pane, scrollable::Viewport),
-    // Memory
-    MemoryChangeFormat(pane_grid::Pane, ByteBase),
-    MemoryToggleSize(pane_grid::Pane),
-    MemoryInput(pane_grid::Pane, String),
-    MemorySubmit(pane_grid::Pane),
-    MemoryPaste(pane_grid::Pane, String),
-    MemoryAddress(pane_grid::Pane, iced::mouse::ScrollDelta, i8), //the i8 is as a signed multiplier, mirroring the axis
-    MemoryReset(pane_grid::Pane),
     // Terminal
     TerminalType(pane_grid::Pane, String),
     TerminalPaste(pane_grid::Pane, String),
     TerminalSend(pane_grid::Pane),
-    // Assembly
-    AssemblyUpdate(Result<(crate::dwarf::Assembly, usize), ()>),
-    //Stack
+    // Stack
     StackUpdate(pane_grid::Pane),
     StackCollapse(pane_grid::Pane, usize),
-    StackExpand(pane_grid::Pane, usize)
+    StackExpand(pane_grid::Pane, usize),
+    // Assembly
+    AssemblyUpdate(Result<(crate::dwarf::Assembly, usize), ()>),
 }
+
+// Contents
 
 pub fn content(state: &State) -> Container<'_, Message> {
     container(column(
@@ -1026,11 +1791,14 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
     .style(style::bar)
 }
 
-
+// MainFrame
 
 fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
     container(
-        pane_grid(&state.layout.panes, |id, pane, _maximized| pane_view(id, pane, state)).spacing(10)
+        pane_grid(
+            &state.layout.panes,
+            |id, pane, _maximized| pane_view(id, pane, state)
+        ).spacing(10)
         .width(Length::Fill)
         .height(Length::Fill)
         .on_click(|pane| Message::Layout(LayoutMessage::_Focus(pane)))
@@ -1044,14 +1812,14 @@ fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
 
 fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
     let (content, titlebar) = match pane {
-        Pane::Code(pane) => (pane_view_code(pane, state, id), pane_titlebar("Code", "icons/pane_source.svg")),
-        Pane::Control(pane) => (pane_view_control(pane, state, id), pane_titlebar("Control", "icons/pane_control.svg")),
-        Pane::Memory(pane) => (pane_view_memory(pane, id), pane_titlebar("Memory", "icons/pane_memory.svg")),
-        Pane::Stack(pane) => (pane_view_stack(pane, state, id), pane_titlebar("CallStack", "icons/pane_stack.svg")),
-        Pane::Registers(pane) => (pane_view_registers(pane, id), pane_titlebar("Registers", "icons/pane_registers.svg")),
-        Pane::Assembly(pane) => (pane_view_assembly(pane, state, id), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
-        Pane::Terminal(pane) => (pane_view_terminal(pane, state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
-        Pane::Info => (pane_view_info(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
+        Pane::Control(control) => (control.view(state, id), pane_titlebar("Control", "icons/pane_control.svg")),
+        Pane::Registers(registers) => (registers.view(id), pane_titlebar("Registers", "icons/pane_registers.svg")),
+        Pane::Memory(memory) => (memory.view(id), pane_titlebar("Memory", "icons/pane_memory.svg")),
+        Pane::Code(code) => (code.view(state, id), pane_titlebar("Code", "icons/pane_source.svg")),
+        Pane::Info => (PaneInfo::view(), pane_titlebar("ELF Info", "icons/pane_info.svg")),
+        Pane::Terminal(terminal) => (terminal.view(state, id), pane_titlebar("Terminal", "icons/pane_terminal.svg")),
+        Pane::Stack(stack) => (stack.view(state, id), pane_titlebar("CallStack", "icons/pane_stack.svg")),
+        Pane::Assembly(assembly) => (assembly.view(state, id), pane_titlebar("Assembly", "icons/pane_assembly.svg")),
 
         _ => (container(text("Some other pane")), pane_grid::TitleBar::new(text("UNDEFINED")))
     };
@@ -1076,146 +1844,7 @@ fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, M
     ).style(style::pane_title)
 }
 
-
-fn pane_view_code<'a>(pane: &'a PaneCode, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    if state.internal.no_debug {
-        return program_message("No debugging informatio")
-    }
-
-    let size = 30;
-
-    let update_button = svg_button(
-        "icons/view.svg",
-        size,
-        Some(if pane.update {style::widget_svg_toggled} else {style::widget_svg}))
-    .style(if pane.update {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::CodeToggleUpdate(id)));
-
-    let bind = SOURCE.access();
-    if bind.is_none() {
-        if state.internal.no_debug {
-            return program_message("No debugging information present in the file.");
-        }
-        return program_message("Load the program to display source code.");
-    };
-
-    let source = bind.clone().unwrap();
-
-    let mut dirs: Vec<String> = source.keys().map(|path| String::from(path.to_str().unwrap())).collect();
-    dirs.sort();
-    dirs.dedup();
-
-    let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs.clone(), pane.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
-
-    let mut files: Vec<String> = source[&PathBuf::from(pane.dir.clone().unwrap_or(dirs[0].clone()))].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
-    files.sort();
-    files.dedup();
-
-    let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, pane.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
-
-    let code = if pane.dir.is_some() {match &pane.file {
-        Some(file) => {
-            let comp_path = PathBuf::from(pane.dir.as_ref().unwrap());
-            let file_path = PathBuf::from(file);
-            let code = code_display(comp_path, file_path, source, pane, &state.internal.pane.file);
-            if code.is_ok() {
-                container(scrollable(
-                code.unwrap()
-                ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
-                .height(Length::Fill)
-                .width(Length::Fill)
-                .id(pane.scrollable.clone())
-                .on_scroll(move |view| Message::Pane(PaneMessage::CodeScroll(id, view))))
-            } else {
-                program_message("File contents not loaded.")
-            }
-        },
-        None => program_message("File not selected.").into()
-    }} else {
-        program_message("Directory not selected.").into()
-    };
-
-    container(
-        column![
-            row![hash_list, file_list, widget_fill(), update_button].spacing(10).padding(3).height(size+6),
-            code
-        ]
-    ).style(style::back)
-}
-
-fn code_display<'a>(comp_path: PathBuf, file_path: PathBuf, source: SourceMap, pane: &'a PaneCode, line: &Option<SourceIndex>) -> Result<Row<'a, Message>, ()> {
-
-    let (file, index) = match source.get_file(comp_path.clone(), file_path.clone()) {
-        Some(file) => file,
-        None => return Err(())
-    };
-    if file.content.is_none() {
-        return Err(())
-    }
-
-    let size = 25;
-
-    let mut lines = Vec::new();
-    let breakpoints = column(
-        pane.breakpoints.iter().enumerate().map(|(index, address)| {
-            lines.push(index);
-            breakpoint_button(*address, size).into()
-        })
-    );
-
-    let highlight = match line {
-        Some(index) => {
-            let real_name = &source.index_with_line(index).path;
-            if index.hash_path == comp_path && file_path == *real_name {
-                index.line
-            } else {
-                0
-            }
-        },
-        None => 0
-    };
-
-    let line_number = column(
-        lines.iter().map(|num|
-            if highlight as usize == *num+1  {
-                text(num + 1).style(style::line).font(BOLD)
-            } else {
-                text(num + 1).style(style::weak)
-            }.size(size-8).height(size).center().into()
-        )
-    ).width(Length::Shrink).align_x(iced::Right);
-
-    let text = text(file.content.clone().unwrap()).size(size-8)
-    .line_height(text::LineHeight::Absolute(iced::Pixels(size as f32)))
-    .wrapping(text::Wrapping::None);
-
-    Ok(row![
-        breakpoints, line_number, container("").width(5), text
-    ].spacing(0)
-    .padding(5))
-}
-
-fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
-    match address {
-        Some(address) => {
-            let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
-            button(
-                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
-                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
-                .width(Length::Fill)
-                .height(Length::Fill)
-            ).style(style::breakpoint)
-            .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
-            .width(size)
-            .height(size)
-            .padding(7)
-        },
-        None => button("")
-            .style(style::breakpoint)
-            .width(size)
-            .height(size)
-    }
-}
+// Code Scrolling
 
 pub fn code_panes_update(state: &mut State) -> Option<(Task<Message>, Task<Message>)> {
     let file = match &state.internal.pane.file {
@@ -1290,495 +1919,7 @@ pub fn check_for_code(state: &mut State) -> bool {
     false
 }
 
-
-fn pane_view_control<'a>(pane: &'a PaneControl, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    let size = 30;
-
-    let file = FILE.access().is_some();
-    let run = PID.access().is_some();
-    let stopped = state.internal.stopped;
-
-    let start_stop = if run {
-        svg_button("icons/stop.svg", size, Some(style::widget_svg))
-        .style(style::widget_button)
-        .on_press(Message::Operation(Operation::StopTracee))
-    } else {
-        svg_button("icons/run.svg", size, Some(if file {style::widget_svg} else {style::button_svg_disabled}))
-        .style(style::widget_button)
-        .on_press_maybe(if file {Some(Message::Operation(Operation::RunTracee))} else {None})
-    };
-
-    let pause_cont = if stopped {
-        svg_button("icons/continue.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
-        .on_press_maybe(if run {Some(Message::Operation(Operation::Continue))} else {None})
-        .style(style::widget_button)
-    } else {
-        svg_button("icons/pause.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
-        .on_press_maybe(if run {Some(Message::Operation(Operation::Pause))} else {None})
-        .style(style::widget_button)
-    };
-
-    let step = svg_button("icons/step.svg", size, Some(if stopped {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if stopped {Some(Message::Operation(Operation::Step))} else {None})
-    .style(style::widget_button);
-
-    let source_step = svg_button(
-        "icons/source_step.svg",
-        size, 
-        Some(
-            if stopped & !state.internal.no_debug & state.last_signal.is_none() {style::widget_svg}
-            else {style::button_svg_disabled}
-        )
-    ).on_press_maybe(
-        if stopped & !state.internal.no_debug & state.last_signal.is_none() {
-            Some(Message::Operation(Operation::SourceStep))
-        } else {None}
-    ).style(style::widget_button);
-
-    let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
-    .style(style::widget_button);
-
-    let signal = svg_button("icons/signal.svg", size, Some(if pane.selected_signal.is_some() {style::widget_svg} else {style::button_svg_disabled}))
-    .on_press_maybe(if pane.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(pane.selected_signal.unwrap())))} else {None})
-    .style(style::widget_button);
-
-    let signals = [
-        Signal::SIGKILL,
-        Signal::SIGINT,
-        Signal::SIGQUIT,
-        Signal::SIGHUP,
-        Signal::SIGTRAP,
-        Signal::SIGCONT,
-        Signal::SIGABRT,
-        Signal::SIGFPE,
-        Signal::SIGUSR1,
-        Signal::SIGUSR2,
-        Signal::SIGSEGV,
-        Signal::SIGTERM,
-        Signal::SIGCHLD,
-        Signal::SIGSTOP,
-        Signal::SIGTSTP,
-    ];
-
-    let select = pick_list(signals, pane.selected_signal, move |signal| Message::Pane(PaneMessage::ControlSelectSignal(id, signal)))
-    .placeholder("Signal...");
-
-    let content = container(row![
-        start_stop,
-        pause_cont,
-        step,
-        source_step,
-        kill,
-        signal,
-        select
-    ].padding(3)).style(style::back).width(Length::Fill);
-    content
-}
-
-fn pane_view_memory<'a>(pane: &'a PaneMemory, id: pane_grid::Pane) -> Container<'a, Message> {
-    if MEMORY.access().is_none() {
-        return program_message("Start the program to display memory.");
-    };
-
-    let size = 30;
-
-    let button_hex: button::Button<'_, Message> = button(
-        text("0x").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == ByteBase::Hex {style::widget_text_toggled} else {style::widget_text})
-    ).padding(0)
-    .height(size)
-    .width(size)
-    .style(if pane.format == ByteBase::Hex {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Hex)));
-
-    let button_dec: button::Button<'_, Message> = button(
-        text("10").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == ByteBase::Dec {style::widget_text_toggled} else {style::widget_text})
-    ).padding(0)
-    .height(size)
-    .width(size)
-    .style(if pane.format == ByteBase::Dec {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Dec)));
-
-    let button_chr: button::Button<'_, Message> = button(
-        text("A").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == ByteBase::Chr {style::widget_text_toggled} else {style::widget_text})
-    ).padding(0)
-    .height(size)
-    .width(size)
-    .style(if pane.format == ByteBase::Chr {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::MemoryChangeFormat(id, ByteBase::Chr)));
-
-    let bytesize: button::Button<'_, Message> = button(
-        text(if pane.more_bytes {"8"} else {"4"}).center().size(size - 12).style(style::widget_text)
-    )
-    .padding(0)
-    .height(size)
-    .width(size)
-    .style(style::widget_button)
-    .on_press(Message::Pane(PaneMessage::MemoryToggleSize(id)));
-
-    let address: text_input::TextInput<'_, Message> = text_input("0x...", &pane.field)
-    .on_input(move |data| Message::Pane(PaneMessage::MemoryInput(id, data)))
-    .on_submit(Message::Pane(PaneMessage::MemorySubmit(id)))
-    .on_paste(move |data| Message::Pane(PaneMessage::MemoryPaste(id, data)))
-    .size(size - 12)
-    .line_height(iced::Pixels(size as f32 - 10.))
-    .width(Length::Fill)
-    .style(|theme, status| style::address(theme, status, pane.incorrect));
-
-    let field = row![
-        text("Address:").size(size - 12).center().height(size),
-        container(mouse_area(address).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, 1)))).width(Length::FillPortion(4)),
-        widget_fill(),
-        button_hex,
-        button_dec,
-        button_chr,
-        bytesize
-    ].spacing(2).padding(3).height(Length::Shrink);
-
-    let test = match test_memory(pane.address) {
-        Err(test) => test,
-        Ok(()) => false
-    };
-
-    let memory = if test {
-        container(column![
-            text("Read out of memory map bounds.").width(Length::Fill).center().style(style::error),
-            container(button(text("Reload to begining of program map")).on_press(Message::Pane(PaneMessage::MemoryReset(id)))).width(Length::Fill).center_x(Length::Fill)
-        ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
-    } else {
-        let data: &Vec<u8>= &pane.data;
-
-        let mut addresses: Vec<u64> = Vec::new();
-        let mut bytes: Vec<Vec<u8>> = if pane.more_bytes {
-            vec![Vec::new(); 8]
-        } else {
-            vec![Vec::new(); 4]
-        };
-
-        let len = bytes.len();
-        let mut pointer = pane.address - pane.address % len as u64;
-        let start = pointer - pane.read_address;
-
-        for (i, byte) in data[start as usize..].iter().enumerate() {
-            if i % len == 0 {
-                addresses.push(pointer);
-                pointer += len as u64;
-            };
-
-            bytes[i % len].push(*byte);
-            if i == 40*len - 1 { // 40 lines
-                break;
-            }
-        };
-
-        let size = 25;
-
-        let address_column: iced::widget::Column<'_, Message> = column(
-            addresses.iter().map(|addr| text(
-                format!("0x{:06x}", addr)
-            ).size(size - 5)
-            .height(size)
-            .center()
-            .style(style::weak)
-            .into())
-        );
-
-        let byte_columns: iced::widget::Row<'_, Message> = row(bytes.iter().map(|col| column(
-            col.iter().map(|byte| text(
-                pane.format.form(*byte)
-            ).size(size - 5)
-            .height(size)
-            .center()
-            .style(style::widget_text)
-            .into())
-        ).align_x(iced::Alignment::Center)
-        .width(match pane.format {
-            ByteBase::Chr => Length::Fixed(20 as f32),
-            _ => Length::Shrink
-        })
-        .into())
-        ).spacing(match pane.format {
-            ByteBase::Hex => 10,
-            ByteBase::Chr => 10,
-            ByteBase::Dec => 15
-        });
-
-        container(mouse_area(
-            row![address_column, byte_columns]
-            .height(Length::Fill)
-            .width(Length::Fill)
-            .padding(5)
-            .spacing(20)
-        ).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, -3))))
-    };
-
-    let content = container(column![
-        field,
-        memory
-    ]).style(style::back);
-    content
-}
-
-
-fn pane_view_stack<'a>(pane: &'a PaneStack, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    let stack = match &state.internal.pane.stack {
-        Some(stack) => stack,
-        None => if PID.access().is_some() {
-            return program_message("Stack data not loaded")
-        } else {
-            return program_message("Start the program to display stack data.")
-        }
-    };
-
-    if pane.unique != state.internal.pane.unique_stack {
-        return container(column![
-            text("Old Stack Data").width(Length::Fill).center(),
-            container(button(text("Update Stack")).on_press(Message::Pane(PaneMessage::StackUpdate(id)))).width(Length::Fill).center_x(Length::Fill)
-        ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
-    };
-
-    let size: u16 = 23;
-
-    let open_vec = &pane.open;
-
-    let mut collapse = column![].width(size);
-    let mut lines = column![];
-
-    for (i, open) in open_vec.iter().enumerate() {
-        if !open {continue;}
-        let (depth, line) = &stack[i];
-        let data = if *depth == 0 {
-            text(line).style(style::widget_text)
-        } else {
-            text(line)
-        }.height(size).size(size-5);
-        lines = lines.push(
-            container(data)
-            .padding(padding::left(size*depth.checked_sub(1).unwrap_or(0) as u16)) // removing the indent on the closing brackets of params, while keeping correct collapse rules
-        );
-        match stack.get(i+1) {
-            Some((next_depth, _)) => if next_depth > depth {
-                collapse = collapse.push(collapse_button(open_vec[i+1], i, size, id));
-            } else {
-                collapse = collapse.push(container("").height(size));
-            }
-            None => ()
-        };
-    }
-
-    let content = container(
-        scrollable(
-            row![collapse, lines].padding(padding::Padding {bottom: 10., right: 10., ..Default::default()}) // padding for the scrollbars
-        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
-        .width(Length::Fill)
-        .height(Length::Fill)
-    ).style(style::back);
-    content
-}
-
-fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane) -> button::Button<'a, Message> {
-    if open {
-        svg_button("icons/collapse.svg", size, Some(style::collapse_svg))
-        .on_press(Message::Pane(PaneMessage::StackCollapse(id, index)))
-    } else {
-        svg_button("icons/pane_terminal.svg", size, Some(style::collapse_svg_toggled))
-        .on_press(Message::Pane(PaneMessage::StackExpand(id, index)))
-    }.style(style::breakpoint)
-}
-
-fn pane_view_registers<'a>(pane: &'a PaneRegisters, id: pane_grid::Pane) -> Container<'a, Message> {
-    fn flags(num: u64) -> String {
-        let of = if num & (1 << 11) != 0 {"|OF"} else {""};
-        let df = if num & (1 << 10) != 0 {"|DF"} else {""};
-        let sf = if num & (1 << 7)  != 0 {"|SF"} else {""};
-        let zf = if num & (1 << 6)  != 0 {"|ZF"} else {""};
-        let af = if num & (1 << 4)  != 0 {"|AF"} else {""};
-        let pf = if num & (1 << 2)  != 0 {"|PF"} else {""};
-        let cf = if num & (1)       != 0 {"|CF"} else {""};
-        let mut display = format!("{}{}{}{}{}{}{}", of, df, sf, zf, af, pf, cf);
-        if display.len() > 0 {
-            display.push('|');
-        };
-        display
-    }
-
-
-    let size = 30;
-
-    let button_hex: button::Button<'_, Message> = button(
-        text("0x").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == Base::Hex {style::widget_text_toggled} else {style::widget_text})
-    ).padding(0)
-    .height(size)
-    .width(size)
-    .style(if pane.format == Base::Hex {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Hex)));
-
-    let button_dec: button::Button<'_, Message> = button(
-        text("10").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == Base::Dec {style::widget_text_toggled} else {style::widget_text})
-    ).padding(4)
-    .height(size)
-    .width(size)
-    .style(if pane.format == Base::Dec {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Dec)));
-
-    let button_oct: button::Button<'_, Message> = button(
-        text("0o").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == Base::Oct {style::widget_text_toggled} else {style::widget_text})
-    ).padding(4)
-    .height(size)
-    .width(size)
-    .style(if pane.format == Base::Oct {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Oct)));
-
-    let button_bin: button::Button<'_, Message> = button(
-        text("0b").center().font(EXTRABOLD).size(size - 12)
-        .style(if pane.format == Base::Bin {style::widget_text_toggled} else {style::widget_text})
-    ).padding(4)
-    .height(size)
-    .width(size)
-    .style(if pane.format == Base::Bin {style::widget_button_toggled} else {style::widget_button})
-    .on_press(Message::Pane(PaneMessage::RegistersChangeFormat(id, Base::Bin)));
-
-    let regs = REGISTERS.access().clone();
-
-    let (reg, value) = match regs {
-        Some(regs) => ([
-            "RIP:",
-            "RAX:",
-            "RBX:",
-            "RCX:",
-            "RDX:",
-            "RSI:",
-            "RDI:",
-            "RBP:",
-            "RSP:",
-            "R8:",
-            "R9:",
-            "R10:",
-            "R11:",
-            "R12:",
-            "R13:",
-            "R14:",
-            "R15:",
-            "RFS:",
-            "CS:",
-            "SS:",
-            "DS:",
-            "ES:",
-            "FS:",
-            "GS:",
-            "FSB:",
-            "GSB:"
-        ], [
-        regs.rip,
-        regs.rax,
-        regs.rbx,
-        regs.rcx,
-        regs.rdx,
-        regs.rsi,
-        regs.rdi,
-        regs.rbp,
-        regs.rsp,
-        regs.r8,
-        regs.r9,
-        regs.r10,
-        regs.r11,
-        regs.r12,
-        regs.r13,
-        regs.r14,
-        regs.r15,
-        regs.eflags,
-        regs.cs,
-        regs.ss,
-        regs.ds,
-        regs.es,
-        regs.fs,
-        regs.gs,
-        regs.fs_base,
-        regs.gs_base
-        ]),
-        None => return program_message("Start the program to display registers.")
-    };
-
-    let mut counter = 0;
-
-    let reg_lines = column(reg.map(|name| text(name).center().size(18).wrapping(text::Wrapping::None).into()));
-    let value_lines = column(value.map(|num|
-        if counter == 17 {
-            counter += 1;
-            text(format!("{}   {}", pane.format.form(num), flags(num))).center().size(18).style(style::widget_text).wrapping(text::Wrapping::None).into()
-        } else {
-            counter += 1;
-            text(pane.format.form(num)).center().size(18).style(style::widget_text).wrapping(text::Wrapping::None).into()
-        }
-    )).clip(true);
-
-
-    let content = container(column![
-        row![button_hex, button_dec, button_oct, button_bin].padding(3).spacing(3),
-        scrollable(row![reg_lines, value_lines].padding(5).spacing(10)).width(Length::Fill).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new().scroller_width(0).width(0) })
-    ]).style(style::back);
-    content
-}
-
-
-fn pane_view_assembly<'a>(pane: &'a PaneAssembly, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    if PID.access().is_none() {
-        return program_message("Start the program to display assembly instructions.");
-    }
-
-    let size = 30;
-
-    let rip = REGISTERS.access().unwrap().rip;
-
-    let assembly = if let Some(assembly) = &state.internal.pane.assembly {
-        let breakpoints = column(
-            assembly.addresses.iter().map(|address| 
-                breakpoint_button(Some(normal(*address)), size-5).into()
-            )
-        );
-
-        let addresses = column(
-            assembly.addresses.iter().map(|address|
-                if address == &rip {
-                    text(format!("0x{:06x}", address)).style(style::line).font(BOLD)
-                } else {
-                    text(format!("0x{:06x}", address)).style(style::weak)
-                }.size(size-12).center().height(size-5).into()
-            )
-        );
-
-        let bytes = text(&assembly.bytes)
-        .size(size-12).line_height(iced::Pixels((size-5) as f32));
-
-        let instructions = text(&assembly.text)
-        .size(size-12).line_height(iced::Pixels((size-5) as f32));
-
-        scrollable(
-            row![
-                breakpoints,
-                addresses,
-                container("").width(10),
-                bytes,
-                container("").width(10),
-                instructions
-            ]
-        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
-        .id(pane.scrollable.clone())
-        .height(Length::Fill)
-        .width(Length::Fill)
-    } else {
-        return program_message("Assembly not loaded.")
-    };
-    container(
-        assembly
-    ).style(style::back)
-}
+// Assembly Scrolling
 
 pub fn assembly_scroll(state: &mut State, line: usize, task: &mut Option<Task<Message>>) {
     let panes = &state.layout.panes;
@@ -1804,160 +1945,7 @@ pub fn check_for_assembly(state: &mut State) -> bool {
     false
 }
 
-
-fn pane_view_terminal<'a>(pane: &'a PaneTerminal, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
-    let size = 20;
-
-    if PID.access().is_none() {
-        return program_message("Start the program to display the terminal.");
-    }
-
-    if STDIO.access().is_none() {
-        return program_message("Terminal is set to external.");
-    }
-
-    let input = text_input("Input...", &pane.input)
-    .size(size-5).line_height(iced::Pixels(size as f32))
-    .on_input(move |text| Message::Pane(PaneMessage::TerminalType(id, text)))
-    .on_paste(move |text| Message::Pane(PaneMessage::TerminalPaste(id, text)))
-    .on_submit(Message::Pane(PaneMessage::TerminalSend(id)));
-
-    let output = container(
-        scrollable(
-            text(format!("{}_", state.internal.pane.output)).size(size-5).line_height(0.95)
-        ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
-        .anchor_bottom()
-        .anchor_left()
-        .height(Length::Fill)
-        .width(Length::Fill)
-    ).padding(5)
-    .style(style::terminal);
-
-
-    container(column![
-        output,
-        input
-    ].spacing(5)).style(style::back).padding(2)
-
-}
-
-fn pane_view_info<'a>() -> Container<'a, Message> {
-    let bind = EHFRAME.access();
-    if bind.is_none() {
-        return program_message("Load the program to display ELF info.");
-    };
-    let file = match &bind.as_ref().unwrap().object {
-        ::object::File::Elf64(elf) => elf,
-        _ => panic!()
-    };
-
-    let elf_header = file.elf_header();
-    let info = [
-        ("Class:", InfoNamed::class(elf_header.e_ident.class)),
-        ("Data:", InfoNamed::data(elf_header.e_ident.data)),
-        ("Version:", &elf_header.e_ident.version.to_string()),
-        ("OS/ABI", InfoNamed::os(elf_header.e_ident.os_abi)),
-        ("ABI Version:", &elf_header.e_ident.abi_version.to_string()),
-        ("Type:", InfoNamed::typ(elf_header.e_type.get(file.endian()))),
-        ("Machine:", InfoNamed::machine(elf_header.e_machine.get(file.endian()))),
-        ("Entry point address:", &format!("0x{:x}", elf_header.e_entry.get(file.endian()))),
-        ("Program headers:", &format!("{} (offset into the file)", elf_header.e_phoff.get(file.endian()))),
-        ("Section headers:", &format!("{} (offset into the file)", elf_header.e_shoff.get(file.endian()))),
-    ];
-
-    let size = 20;
-
-    let field = column(info.iter().map(|(field, _)| {
-        text(field.to_string()).size(size-5).center().height(size).wrapping(text::Wrapping::None).into()
-    }));
-
-    let value = column(info.iter().map(|(_, value)| {
-        text(value.to_string()).size(size-5).center().height(size).style(style::widget_text).wrapping(text::Wrapping::None).into()
-    }));
-
-    let data = row![
-        field, value
-    ].padding(5).spacing(30);
-
-    container(
-        data
-    ).width(Length::Fill).height(Length::Fill).style(style::back)
-
-}
-
-struct InfoNamed;
-
-impl InfoNamed {
-    fn class(x: u8) -> &'static str {
-        match x {
-            1 => "ELF32",
-            2 => "ELF64",
-            _ => "Invalid Class"
-        }
-    }
-
-    fn data(x: u8) -> &'static str {
-        match x {
-            1 => "Little Endian",
-            2 => "Big Endian",
-            _ => "Unknown"
-        }
-    }
-
-    fn os(x: u8) -> &'static str {
-        match x {
-            0 => "System V",
-            1 => "HP-UX",
-            2 => "NetBSD",
-            3 => "Linux",
-            4 => "GNU Hurd", // I did not miss 5, 5 is reserved :D
-            6 => "Solaris",
-            7 => "AIX",
-            8 => "IRIX",
-            9 => "FreeBSD",
-            10 => "Tru64",
-            11 => "Novell Modesto",
-            12 => "OpenBSD",
-            13 => "OpenVMS",
-            14 => "NonStop Kernel",
-            15 => "AROS",
-            16 => "FenixOS",
-            17 => "Nuxi CloudABI",
-            18 => "Stratus Technologies OpenVOS",
-            _ => "Unknow OS"
-        }
-    }
-
-    fn typ(x: u16) -> &'static str {
-        match x {
-            1 => "REL (Relocatable file)",
-            2 => "EXEC (Executable file)",
-            3 => "DYN (Position-independent exec)",
-            4 => "CORE (Core file.)",
-            0xFE00|
-            0xFEFF|
-            0xFF00|
-            0xFFFF => "Reserved.",
-            _ => "Unknown Type"
-        }
-    }
-
-    fn machine(x: u16) -> &'static str { // im using abbreviated names for simplicity
-        match x {
-            0 => "Unspecified",
-            1 => "AT&T",
-            0x02 => "SPARC",
-            0x03 => "x86",
-            0x06 => "Intel",
-            0x3e => "AMD x86-64",
-            _ => "Unknown or Unsupported Machine" // My program really supports only x86-64 so I dont have to write them out now
-        }
-    }
-}
-
-
-
-//PaneMessage Handle (Mainframe Operations)
+// PaneMessage Handle (Mainframe Operations)
 
 fn get_pane<'a>(panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane) -> &'a mut Pane {
     panes.get_mut(pane).unwrap()
@@ -2072,8 +2060,8 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         PaneMessage::MemoryAddress(pane, delta, mult) => {
             let data = get_pane(panes, pane).memory();
             let y = match delta {
-                iced::mouse::ScrollDelta::Lines { x, y } => y*mult as f32,
-                iced::mouse::ScrollDelta::Pixels { x, y } => y*mult as f32,
+                iced::mouse::ScrollDelta::Lines { x: _, y } => y*mult as f32,
+                iced::mouse::ScrollDelta::Pixels { x: _, y } => y*mult as f32,
             };
             if data.more_bytes {
                 let round = data.address % (8*mult.abs() as u64);
@@ -2197,6 +2185,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
     };
 }
 
+
 pub fn source_content(file: PathBuf) -> Option<String> {
     match object::read_source(&file) {
         Ok(mut data) => Some({
@@ -2305,7 +2294,7 @@ pub fn layout_message(state: &mut State, message: LayoutMessage) {
     };
 }
 
-fn layout(layout: &mut Layout, pane: LayoutMessage) {
+fn layout(layout: &mut Layout, pane: LayoutMessage) { // layout update
     let (main, left, right, panel) = layout.get_nodes();
     let mut saved_state = SAVED_STATE.access().clone().unwrap();
 
@@ -2415,6 +2404,42 @@ fn limit(ratio: f32) -> f32 { // this is not a user function, but to prevent som
 }
 
 
+// Formating Helpers
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Base {
+    #[default]
+    Hex,
+    Dec,
+    Oct,
+    Bin,
+}
+impl Base {
+    pub fn form(&self, num: u64) -> String {
+        match self {
+            Self::Hex => format!("0x{:x}", num),
+            Self::Dec => format!("{}", num),
+            Self::Oct => format!("0o{:o}", num),
+            Self::Bin => format!("0b{:b}", num),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum ByteBase { // like base but for single bytes
+    #[default]
+    Hex,
+    Dec,
+    Chr
+}
+impl ByteBase {
+    fn form(&self, num: u8) -> String {
+        match self {
+            Self::Hex => format!("{:02x}", num),
+            Self::Dec => format!("{}", num),
+            Self::Chr => format!("{}", if num.is_ascii_graphic() {(num as char).to_string()} else {if num == 0x20 {"' '"} else {"'.'"}.to_string()}),
+        }
+    }
+}
 
 // Widgets helpers
 
@@ -2426,6 +2451,28 @@ fn svg_button<'a>(icon: &str, size: u16, svg_style: Option<fn(&Theme, svg::Statu
     ).padding(4)
     .height(size)
     .width(size)
+}
+
+fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
+    match address {
+        Some(address) => {
+            let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
+            button(
+                svg(Handle::from_memory(Asset::get("icons/signal.svg").unwrap().data))
+                .style(if present {style::breakpoint_svg_toggled} else {style::breakpoint_svg})
+                .width(Length::Fill)
+                .height(Length::Fill)
+            ).style(style::breakpoint)
+            .on_press(if present {Message::Operation(Operation::BreakpointRemove(address))} else {Message::Operation(Operation::BreakpointAdd(address))})
+            .width(size)
+            .height(size)
+            .padding(7)
+        },
+        None => button("")
+            .style(style::breakpoint)
+            .width(size)
+            .height(size)
+    }
 }
 
 fn widget_fill<'a>() -> Container<'a, Message> {

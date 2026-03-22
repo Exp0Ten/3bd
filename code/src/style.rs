@@ -3,14 +3,15 @@ use iced::{
     border::Radius,
     widget::{
         container, button, svg, text, text_input
-    },
-
+    }
 };
+
+
+// FILE: style.rs - Styling functions for the ui.rs
 
 pub fn back(theme: &Theme) -> container::Style {
     let pallete = theme.extended_palette();
     container::Style {
-        //text_color: Some(pallete.primary.base.text),
         background: Some(Background::Color(pallete.background.base.color)),
         border: Border {
             radius: Radius::new(0),
@@ -20,19 +21,9 @@ pub fn back(theme: &Theme) -> container::Style {
     }
 }
 
-pub fn error(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.extended_palette().danger.base.color) }
-}
-
-pub fn weak(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.extended_palette().background.weak.color) }
-}
-
-
 pub fn bar(theme: &Theme) -> container::Style {
     let pallete = theme.extended_palette();
     container::Style {
-        //text_color: Some(pallete.primary.base.text),
         background: Some(Background::Color(pallete.background.weak.color)),
         border: Border {
             radius: Radius::new(0),
@@ -40,6 +31,15 @@ pub fn bar(theme: &Theme) -> container::Style {
         },
         ..Default::default()
     }
+}
+
+
+pub fn error(theme: &Theme) -> text::Style {
+    text::Style { color: Some(theme.extended_palette().danger.base.color) }
+}
+
+pub fn weak(theme: &Theme) -> text::Style {
+    text::Style { color: Some(theme.extended_palette().background.weak.color) }
 }
 
 pub fn widget_text(theme: &Theme) -> text::Style {
@@ -52,10 +52,10 @@ pub fn widget_text_toggled(theme: &Theme) -> text::Style {
     text::Style { color: Some(pallete.background.base.color) }
 }
 
+
 pub fn pane_title(theme: &Theme) -> container::Style {
     let pallete = theme.extended_palette();
     container::Style {
-        //text_color: Some(pallete.primary.base.text),
         background: Some(Background::Color(color_darken(pallete.background.weak.color, 0.2))),
         border: Border {
             radius: Radius::new(0),
@@ -64,6 +64,7 @@ pub fn pane_title(theme: &Theme) -> container::Style {
         ..Default::default()
     }
 }
+
 
 pub fn bar_svg(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
@@ -89,6 +90,7 @@ pub fn widget_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
     svg::Style { color: Some(pallete.background.base.color) }
 }
+
 
 pub fn bar_button(theme: &Theme, status: button::Status) -> button::Style {
     let pallete = theme.extended_palette();
@@ -158,6 +160,7 @@ pub fn widget_button_toggled(theme: &Theme, status: button::Status) -> button::S
     }
 }
 
+
 pub fn breakpoint(_theme: &Theme, _status: button::Status) -> button::Style {
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
@@ -180,6 +183,7 @@ pub fn breakpoint_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style
     }
 }
 
+
 pub fn collapse_svg(theme: &Theme, status: svg::Status) -> svg::Style {
     svg::Style {
         color: match status {
@@ -194,6 +198,7 @@ pub fn collapse_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
         color: Some(theme.extended_palette().secondary.base.color)
     }
 }
+
 
 pub fn address(theme: &Theme, status: text_input::Status, incorrect: bool) -> text_input::Style {
     let mut default = text_input::default(theme, status);
@@ -221,6 +226,8 @@ pub fn terminal(theme: &Theme) -> container::Style {
         ..Default::default()
     }
 }
+
+
 
 // Color Helpers
 
