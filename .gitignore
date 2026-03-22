@@ -4,3 +4,5 @@ build/tbd
 /target
 /test/rust/target
 /test/rust/Cargo.lock
+
+a.out

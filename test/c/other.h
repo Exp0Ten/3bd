@@ -1,3 +1,3 @@
 
 
-int plus();
+int plus(int, int);

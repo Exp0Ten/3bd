@@ -63,7 +63,7 @@ pub struct SavedState {
 // init function for Global
 const fn empty<T>() -> Global<T> {Mutex::new(None)}
 
-pub trait ImplGlobal<T> {
+pub trait ImplGlobal<T> { // trait because you cant implement external types, and Global is only a TypeDef, not a local struct type
     fn access(&self) -> MutexGuard<'_, Option<T>>;
     fn sets(&self, new: T);
     fn none(&self);

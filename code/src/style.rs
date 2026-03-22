@@ -7,8 +7,9 @@ use iced::{
 };
 
 
-// FILE: style.rs - Styling functions for the ui.rs
+/// FILE: style.rs - Styling functions for the ui.rs
 
+// Container styles
 pub fn back(theme: &Theme) -> container::Style {
     let pallete = theme.extended_palette();
     container::Style {
@@ -33,7 +34,7 @@ pub fn bar(theme: &Theme) -> container::Style {
     }
 }
 
-
+// Text styles
 pub fn error(theme: &Theme) -> text::Style {
     text::Style { color: Some(theme.extended_palette().danger.base.color) }
 }
@@ -52,7 +53,7 @@ pub fn widget_text_toggled(theme: &Theme) -> text::Style {
     text::Style { color: Some(pallete.background.base.color) }
 }
 
-
+// pane titlebar style
 pub fn pane_title(theme: &Theme) -> container::Style {
     let pallete = theme.extended_palette();
     container::Style {
@@ -65,7 +66,7 @@ pub fn pane_title(theme: &Theme) -> container::Style {
     }
 }
 
-
+// SVG styles
 pub fn bar_svg(theme: &Theme, _status: svg::Status) -> svg::Style {
     let pallete = theme.extended_palette();
     svg::Style { color: Some(pallete.background.base.text) }
@@ -91,7 +92,7 @@ pub fn widget_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style { color: Some(pallete.background.base.color) }
 }
 
-
+// lighter on hover, darker on press (as a normal button but needs to be specified with custom style), and toggled versions of the buttons
 pub fn bar_button(theme: &Theme, status: button::Status) -> button::Style {
     let pallete = theme.extended_palette();
     let color = Color::TRANSPARENT;
@@ -160,7 +161,7 @@ pub fn widget_button_toggled(theme: &Theme, status: button::Status) -> button::S
     }
 }
 
-
+// invisible button, reg dot on hover, shown when toggled
 pub fn breakpoint(_theme: &Theme, _status: button::Status) -> button::Style {
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
@@ -183,7 +184,7 @@ pub fn breakpoint_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style
     }
 }
 
-
+// just like breakpoint, but with different color
 pub fn collapse_svg(theme: &Theme, status: svg::Status) -> svg::Style {
     svg::Style {
         color: match status {
@@ -199,7 +200,7 @@ pub fn collapse_svg_toggled(theme: &Theme, _status: svg::Status) -> svg::Style {
     }
 }
 
-
+// other styles
 pub fn address(theme: &Theme, status: text_input::Status, incorrect: bool) -> text_input::Style {
     let mut default = text_input::default(theme, status);
     default.value = theme.extended_palette().primary.base.color;
@@ -228,10 +229,9 @@ pub fn terminal(theme: &Theme) -> container::Style {
 }
 
 
-
 // Color Helpers
 
-fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color {
+fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color { // averaging the color vector
     Color {
         r: color_b.r * factor + color_a.r * (1.-factor),
         g: color_b.g * factor + color_a.g * (1.-factor),
@@ -240,10 +240,10 @@ fn color_mix(color_a: Color, color_b: Color, factor: f32) -> Color {
     }
 }
 
-fn color_lighten(color: Color, factor: f32) -> Color {
+fn color_lighten(color: Color, factor: f32) -> Color { // mix with white
     color_mix(color, Color::WHITE, factor)
 }
 
-fn color_darken(color: Color, factor: f32) -> Color {
+fn color_darken(color: Color, factor: f32) -> Color { // mix with black
     color_mix(color, Color::BLACK, factor)
 }

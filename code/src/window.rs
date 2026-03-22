@@ -73,7 +73,7 @@ pub fn run_app() -> iced::Result {
 
 impl App {
     fn default() -> Self {
-        let config = CONFIG.access().as_ref().unwrap().window.clone().unwrap();
+        let config = CONFIG.access().as_ref().unwrap().window.clone().unwrap(); // gets the windows settings from config
         let size = match config.size {
             Some((width, height)) => iced::Size::new(width as f32, height as f32),
             None => iced::window::Settings::default().size
@@ -110,9 +110,7 @@ impl App {
     // MAIN VIEW FUNCTION
     fn view(&self) -> Element<'_, Message> {
         let state = &self.state;
-
         let content = ui::content(state);
-
         content.into()
     }
 
@@ -162,7 +160,7 @@ impl Dialog {
         .show()
     }
 
-    pub fn file(dir: Option<std::path::PathBuf>, file: Option<String>) -> Option<std::path::PathBuf> {
+    pub fn file(dir: Option<std::path::PathBuf>, file: Option<String>) -> Option<std::path::PathBuf> { // to select the file to debug
         let dir = dir.unwrap_or(std::env::current_dir().unwrap_or("/".into()));
         let file = file.unwrap_or("".to_string());
 

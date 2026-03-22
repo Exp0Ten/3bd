@@ -228,8 +228,6 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 Err(()) => return
             };
 
-            let _ = object::close_child_stdio();
-
             *task = Some(task_reset());
         },
 

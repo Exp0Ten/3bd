@@ -11,7 +11,7 @@ use crate::data::*;
 /// FILE: config.rs - Loading and Handling Configuration data and User Settings
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct Config {
+pub struct Config { // Structure of the TOML config file, fields are optional so you can leave them out and only specify the settings you want to change
     pub layout: Option<Layout>,
     pub window: Option<Window>,
     pub feature: Option<Feature>
@@ -57,7 +57,7 @@ pub enum Theme {
 }
 
 impl Theme {
-    pub fn to_iced_theme(&self) -> iced::Theme{
+    pub fn to_iced_theme(&self) -> iced::Theme {
         match self {
             Self::light => iced::Theme::Light,
             Self::dark => iced::Theme::Dark,
@@ -96,7 +96,7 @@ pub struct Layout {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Copy)]
 pub enum PanelMode {
     middle,
     left,
@@ -126,7 +126,7 @@ pub enum Pane {
 }
 
 impl Default for Config {
-    fn default() -> Self {
+    fn default() -> Self { // loads the default embed config
         let config: Self = toml::from_slice(&Asset::get("config.toml").unwrap().data).unwrap();
         config
     }
@@ -134,8 +134,7 @@ impl Default for Config {
 
 impl Config {
     pub fn merge(&mut self, default: Self) {
-        // UPDATE AND CHECK EVERY FIELD
-
+        // if specified we keep the field, otherwise we set it to it's defualt value
         match &mut self.feature {
             None => self.feature = default.feature,
             Some(feature) => {
@@ -207,6 +206,7 @@ impl Config {
 }
 
 pub fn load_config() -> Config {
+    // we use the ~/.config/tbd/config.toml path for the user settings
     let path = format!("{}/.config/tbd/config.toml", std::env::home_dir().unwrap_or(std::path::PathBuf::new()).to_str().unwrap());
     match fs::read(path) {
         Ok(file) => {
@@ -216,6 +216,6 @@ pub fn load_config() -> Config {
                 Err(err) => {crate::window::Dialog::error(&format!("Config syntax error: {}", err), Some("Config Loading Error")); Config::default()}
             }
         }
-        Err(_) => Config::default()
+        Err(_) => Config::default() // Default if we don't find the file or if there is a syntax error
     }
 }

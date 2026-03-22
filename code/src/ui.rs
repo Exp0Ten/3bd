@@ -30,6 +30,8 @@ use std::{
 
 use nix::sys::signal::Signal;
 
+use ::object as object_foreign;
+
 // internal import
 use crate::{
     window::*,
@@ -51,7 +53,7 @@ const BOLD: font::Font = font::Font {weight: font::Weight::Bold, ..font::Font::D
 // PaneGrid Layout
 const SIDERATIO: f32 = 0.25; // (0.1; 0.4)      // Default ratio of sidebars
 
-pub struct Layout {
+pub struct Layout { // state of the Mainframe
     status_bar: bool,
     sidebar_left: bool,
     sidebar_right: bool,
@@ -63,34 +65,30 @@ pub struct Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        let layout = CONFIG.access().as_ref().unwrap().layout.clone().unwrap();
+        let layout = CONFIG.access().as_ref().unwrap().layout.clone().unwrap(); // load from config
         Layout {
-            status_bar: layout.status_bar.unwrap(),
-            sidebar_left: layout.sidebar_left.unwrap(),
-            sidebar_right: layout.sidebar_right.unwrap(),
-            panel: layout.panel.unwrap(),
-            panel_mode: layout.panel_mode.unwrap(),
-            panes: Self::panes_config(),
+            status_bar: *layout.status_bar.as_ref().unwrap(),
+            sidebar_left: *layout.sidebar_left.as_ref().unwrap(),
+            sidebar_right: *layout.sidebar_right.as_ref().unwrap(),
+            panel: *layout.panel.as_ref().unwrap(),
+            panel_mode: *layout.panel_mode.as_ref().unwrap(),
+            panes: Self::panes_config(&layout),
             _focus: None
         }
     }
 }
 
 impl Layout {
-    fn panes_config() -> pane_grid::State<Pane> {
-        let bind = CONFIG.access();
-        let config = bind.as_ref().unwrap();
-        let layout = config.layout.as_ref().unwrap();
-
+    fn panes_config(layout: &config::Layout) -> pane_grid::State<Pane> { // creating panes from config
         let left = layout.sidebar_left.unwrap();
         let right = layout.sidebar_right.unwrap();
         let panel = layout.panel.unwrap();
         let panel_mode = layout.panel_mode.as_ref().unwrap();
 
         let (left_ratio, right_ratio) = match panel_mode {
-            config::PanelMode::left => {
+            config::PanelMode::left => { // only panel left with panel is opposite calculation
                 if panel {
-                    ((SIDERATIO)/(1.0-SIDERATIO), (1.0 - SIDERATIO))
+                    ((SIDERATIO)/(1.0-SIDERATIO), (1.0 - SIDERATIO)) // converting percantages ...
                 } else {
                     (SIDERATIO, (1.0 - 2.0*SIDERATIO)/(1.0-SIDERATIO))
                 }
@@ -109,43 +107,43 @@ impl Layout {
         list.panel.reverse();
         list.main.reverse();
 
-        let panes = SavedState {
+        let panes = SavedState { // we create the pane configuration of each part
             left_sidebar: (Self::serialize(list.left, pane_grid::Axis::Horizontal), left_ratio),
             right_sidebar: (Self::serialize(list.right, pane_grid::Axis::Horizontal), right_ratio),
             panel: (Self::serialize(list.panel, pane_grid::Axis::Vertical), panel_ratio),
             main: Some(Self::serialize(list.main, pane_grid::Axis::Vertical))
         };
 
-        SAVED_STATE.sets(panes.clone());
+        SAVED_STATE.sets(panes.clone()); // we save this configuration
 
-        let base = Self::base(left, right, panel, &panel_mode, panes);
+        let base = Self::base(left, right, panel, &panel_mode, panes); // we create the final layout from the parts
 
-        pane_grid::State::with_configuration(base)
+        pane_grid::State::with_configuration(base) // state from configuration
     }
 
     fn base(left: bool, right: bool, panel: bool, panel_mode: &config::PanelMode, panes: crate::data::SavedState) -> pane_grid::Configuration<Pane> {
         let left_ratio = panes.left_sidebar.1;
         let right_ratio = panes.right_sidebar.1;
 
-        if panel { return match panel_mode {
+        if panel { return match panel_mode { // if panel, then we match panel type and call respective function
             config::PanelMode::full => Self::panel_full(left, right, panes),
             config::PanelMode::middle => Self::panel_middle(left, right, panes),
             config::PanelMode::left => Self::panel_left(left, right, panes),
             config::PanelMode::right => Self::panel_right(left, right, panes)
         };} else { //without the panel
-            if left & right {
+            if left & right { // if both, then first we split the LEFT and MAIN, and then we split RIGHT from MAIN
                 return pane_grid::Configuration::Split{
                     axis: pane_grid::Axis::Vertical,
                     ratio: left_ratio,
                     a: Box::new(panes.left_sidebar.0),
                     b: Box::new(pane_grid::Configuration::Split {
                     axis: pane_grid::Axis::Vertical,
-                    ratio: right_ratio, // just some math :P, basic percentages
+                    ratio: right_ratio,
                     a: Box::new(panes.main.unwrap()),
                     b: Box::new(panes.right_sidebar.0)
                 })};
             };
-            if left {
+            if left { // if LEFT, then just LEFT and MAIN
                 return pane_grid::Configuration::Split {
                     axis: pane_grid::Axis::Vertical,
                     ratio: left_ratio,
@@ -153,7 +151,7 @@ impl Layout {
                     b: Box::new(panes.main.unwrap())
                 };
             };
-            if right {
+            if right { // if RIGHT, then just MAIN and RIGHT
                 return pane_grid::Configuration::Split {
                     axis: pane_grid::Axis::Vertical,
                     ratio: right_ratio,
@@ -171,7 +169,7 @@ impl Layout {
         let panel_ratio = panes.panel.1;
 
         if left & right {
-            return pane_grid::Configuration::Split {
+            return pane_grid::Configuration::Split { // Same logic as if without panel, but from panel_mode we determine the order
                 axis: pane_grid::Axis::Horizontal,
                 ratio: panel_ratio,
                 b: Box::new(panes.panel.0),
@@ -181,7 +179,7 @@ impl Layout {
                 a: Box::new(panes.left_sidebar.0),
                 b: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,
-                ratio: right_ratio, // just some math :P, basic percentages
+                ratio: right_ratio,
                 a: Box::new(panes.main.unwrap()),
                 b: Box::new(panes.right_sidebar.0)
             })})};
@@ -224,13 +222,13 @@ impl Layout {
         let panel_ratio = panes.panel.1;
 
         if left & right {
-            return pane_grid::Configuration::Split{
+            return pane_grid::Configuration::Split{ // Same logic as if without panel, but from panel_mode we determine the order
                 axis: pane_grid::Axis::Vertical,
                 ratio: left_ratio,
                 a: Box::new(panes.left_sidebar.0),
                 b: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,
-                ratio: right_ratio, // just some math :P, basic percentages
+                ratio: right_ratio,
                 b: Box::new(panes.right_sidebar.0),
                 a: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Horizontal,
@@ -277,7 +275,7 @@ impl Layout {
         let panel_ratio = panes.panel.1;
 
         if left & right {
-            return pane_grid::Configuration::Split {
+            return pane_grid::Configuration::Split { // Only here we first have to create the RIGHT, and then MAIN and PANEL, and then split LEFT from MAIN (thats why mirrored ratios)
                 axis: pane_grid::Axis::Vertical,
                 ratio: right_ratio,
                 b: Box::new(panes.right_sidebar.0),
@@ -287,12 +285,12 @@ impl Layout {
                 b: Box::new(panes.panel.0),
                 a: Box::new(pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Vertical,
-                ratio: left_ratio, // just some math :P, basic percentages
+                ratio: left_ratio,
                 a: Box::new(panes.left_sidebar.0),
                 b: Box::new(panes.main.unwrap()),
             })})};
         };
-        if left {
+        if left { // Normal Logic
             return pane_grid::Configuration::Split {
                 axis: pane_grid::Axis::Horizontal,
                 ratio: panel_ratio,
@@ -330,7 +328,7 @@ impl Layout {
         let panel_ratio = panes.panel.1;
 
         if left & right {
-            return pane_grid::Configuration::Split {
+            return pane_grid::Configuration::Split { // Same logic as if without panel, but from panel_mode we determine the order
                 axis: pane_grid::Axis::Vertical,
                 ratio: left_ratio,
                 a: Box::new(panes.left_sidebar.0),
@@ -377,8 +375,9 @@ impl Layout {
         };
     }
 
-    fn serialize(mut list: Vec<config::Pane>, axis: pane_grid::Axis) -> pane_grid::Configuration<Pane> {
-        fn magic(current: u8) -> f32 { // now when creating evenly distributed panes, we follow a rule of essentially just making 1/(n+1) series, where n is the amount still left, so yea
+
+    fn serialize(mut list: Vec<config::Pane>, axis: pane_grid::Axis) -> pane_grid::Configuration<Pane> { // turning config array of panes, into Configuration
+        fn magic(current: u8) -> f32 { // now when creating evenly distributed panes, we follow a rule of essentially just making 1/(n+1) series, where n is the amount still left
             1.0 / (current + 1) as f32
         }
 
@@ -400,14 +399,14 @@ impl Layout {
         } else {
             pane_grid::Configuration::Split {
                 axis,
-                ratio: magic(list.len() as u8), // more simple math :P
+                ratio: magic(list.len() as u8),
                 a: Box::new(pane_grid::Configuration::Pane(pane)),
                 b: Box::new(Self::serialize(list, axis))
             }
         }
     }
 
-    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE
+    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE // function to find the LEFT sidebar based on layout state
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
@@ -442,7 +441,7 @@ impl Layout {
         }
     }
 
-    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE
+    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE // function to find the RIGHT sidebar based on layout state
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
@@ -500,7 +499,7 @@ impl Layout {
             None => None
         };
 
-        if self.panel { match self.panel_mode {
+        if self.panel { match self.panel_mode { // we reverse the same rules as when defining the base (A lot of indents because the nodes are a recursive Enum and we need to match it)
             config::PanelMode::full => {
                 match layout {
                     pane_grid::Node::Pane(_) => panic!(), // there is a panel
@@ -684,18 +683,18 @@ impl Layout {
             return (main.unwrap(), left, None, panel);
         }
 
-        (main.unwrap(), left, right, panel)
+        (main.unwrap(), left, right, panel) // main is always there
     }
 
-    fn node_to_configuration(&self, node: &pane_grid::Node) -> pane_grid::Configuration<Pane> { // a recursive function, as this is the easiest way, also, its only for the row structures so its actually pretty easy
+    fn node_to_configuration(&self, node: &pane_grid::Node) -> pane_grid::Configuration<Pane> { // a recursive function, as this is the easiest way
         match node {
             pane_grid::Node::Pane(pane) => pane_grid::Configuration::Pane(self.panes.get(*pane).unwrap().clone()), //retrive the state of the pane
             pane_grid::Node::Split { id: _, axis, ratio, a, b } => {
-                pane_grid::Configuration::Split {
+                pane_grid::Configuration::Split { // creating the configuration recursively
                     axis: *axis,
                     ratio: *ratio,
-                    a: Box::new(self.node_to_configuration(a)),
-                    b: Box::new(self.node_to_configuration(b))
+                    a: Box::new(self.node_to_configuration(a)), // recursive calls
+                    b: Box::new(self.node_to_configuration(b)) // recursive calls
                 }
             }
         }
@@ -717,7 +716,7 @@ pub enum Pane { // Generic enum for all bars (completed widgets that can be move
     _Empty
 }
 
-impl Pane {
+impl Pane { // to avoid matching when we know which pane we are working with
     fn memory(&mut self) -> &mut PaneMemory {
         match self {
             Pane::Memory(inner) => inner,
@@ -756,7 +755,7 @@ impl Pane {
     }
 }
 
-
+// Each pane has its own struct (its state), and has a view() function that retrieves the graphics of the pane
 #[derive(Debug, Clone, Default)]
 pub struct PaneControl {
     selected_signal: Option<Signal>,
@@ -765,10 +764,12 @@ impl PaneControl {
     fn view<'a>(&self, state: &'a State, id: pane_grid::Pane) -> Container<'a, Message> {
         let size = 30;
 
+        // loading the states
         let file = FILE.access().is_some();
         let run = PID.access().is_some();
         let stopped = state.internal.stopped;
 
+        // creating the buttons based on the state with different messages and SVGs
         let start_stop = if run {
             svg_button("icons/stop.svg", size, Some(style::widget_svg))
             .style(style::widget_button)
@@ -801,11 +802,12 @@ impl PaneControl {
                 else {style::button_svg_disabled}
             )
         ).on_press_maybe(
-            if stopped & !state.internal.no_debug & state.last_signal.is_none() {
+            if stopped & !state.internal.no_debug & state.last_signal.is_none() { // last signal with source step produces an error, so we force the user to first step to get rid of the signal
                 Some(Message::Operation(Operation::SourceStep))
             } else {None}
         ).style(style::widget_button);
 
+        // kill and signal buttons just set the last signal to the desired signal, delivered on continue or step
         let kill = svg_button("icons/signal_kill.svg", size, Some(if run {style::widget_svg} else {style::button_svg_disabled}))
         .on_press_maybe(if run {Some(Message::Operation(Operation::Kill))} else {None})
         .style(style::widget_button);
@@ -814,7 +816,7 @@ impl PaneControl {
         .on_press_maybe(if self.selected_signal.is_some() {Some(Message::Operation(Operation::Signal(self.selected_signal.unwrap())))} else {None})
         .style(style::widget_button);
 
-        let signals = [
+        let signals = [ // Signals to select
             Signal::SIGKILL,
             Signal::SIGINT,
             Signal::SIGQUIT,
@@ -835,7 +837,7 @@ impl PaneControl {
         let select = pick_list(signals, self.selected_signal, move |signal| Message::Pane(PaneMessage::ControlSelectSignal(id, signal)))
         .placeholder("Signal...");
 
-        let content = container(row![
+        let content = container(row![ // row of buttons
             start_stop,
             pause_cont,
             step,
@@ -855,7 +857,7 @@ pub struct PaneRegisters {
 impl PaneRegisters {
     fn view<'a>(&self, id: pane_grid::Pane) -> Container<'a, Message> {
 
-        fn flags(num: u64) -> String {
+        fn flags(num: u64) -> String { // creating visual flags from set bits in the RFLAGS
             let of = if num & (1 << 11) != 0 {"|OF"} else {""};
             let df = if num & (1 << 10) != 0 {"|DF"} else {""};
             let sf = if num & (1 << 7)  != 0 {"|SF"} else {""};
@@ -872,6 +874,7 @@ impl PaneRegisters {
 
         let size = 30;
 
+        // display format buttons
         let button_hex: button::Button<'_, Message> = button(
             text("0x").center().font(EXTRABOLD).size(size - 12)
             .style(if self.format == Base::Hex {style::widget_text_toggled} else {style::widget_text})
@@ -910,7 +913,7 @@ impl PaneRegisters {
 
         let regs = REGISTERS.access().clone();
 
-        let (reg, value) = match regs {
+        let (reg, value) = match regs { // two lists of reg_names and reg_values
             Some(regs) => ([
                 "RIP:",
                 "RAX:",
@@ -966,18 +969,20 @@ impl PaneRegisters {
             regs.fs_base,
             regs.gs_base
             ]),
-            None => return program_message("Start the program to display registers.")
+            None => return program_message("Start the program to display registers.") // message if None
         };
 
         let mut counter = 0;
 
-        let reg_lines = column(reg.map(|name| text(name).center().size(18).wrapping(text::Wrapping::None).into()));
-        let value_lines = column(value.map(|num|
+        let reg_lines = column(reg.map(|name| //names
+            text(name).center().size(size - 12).wrapping(text::Wrapping::None).into()
+        ));
+        let value_lines = column(value.map(|num| // values
             if counter == 17 { // display flags next to the RFLAGS register
                 counter += 1;
                 text(format!("{}   {}", self.format.form(num), flags(num)))
                 .center()
-                .size(18)
+                .size(size - 12)
                 .style(style::widget_text)
                 .wrapping(text::Wrapping::None)
                 .into()
@@ -985,7 +990,7 @@ impl PaneRegisters {
                 counter += 1;
                 text(self.format.form(num))
                 .center()
-                .size(18)
+                .size(size - 12)
                 .style(style::widget_text)
                 .wrapping(text::Wrapping::None)
                 .into()
@@ -995,7 +1000,11 @@ impl PaneRegisters {
 
         let content = container(column![
             row![button_hex, button_dec, button_oct, button_bin].padding(3).spacing(3),
-            scrollable(row![reg_lines, value_lines].padding(5).spacing(10)).width(Length::Fill).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new().scroller_width(0).width(0) })
+            scrollable(
+                row![reg_lines, value_lines]
+                .padding(5).spacing(10)
+            ).width(Length::Fill)
+            .direction(scrollable::Direction::Both { vertical: scrollbar(), horizontal: no_scrollbar() })
         ]).style(style::back);
         content
     }
@@ -1021,6 +1030,7 @@ impl PaneMemory {
 
         let size = 30;
 
+        // display format buttons
         let button_hex: button::Button<'_, Message> = button(
             text("0x").center().font(EXTRABOLD).size(size - 12)
             .style(if self.format == ByteBase::Hex {style::widget_text_toggled} else {style::widget_text})
@@ -1057,6 +1067,7 @@ impl PaneMemory {
         .style(style::widget_button)
         .on_press(Message::Pane(PaneMessage::MemoryToggleSize(id)));
 
+        // address field
         let address: text_input::TextInput<'_, Message> = text_input("0x...", &self.field)
         .on_input(move |data| Message::Pane(PaneMessage::MemoryInput(id, data)))
         .on_submit(Message::Pane(PaneMessage::MemorySubmit(id)))
@@ -1068,7 +1079,10 @@ impl PaneMemory {
 
         let field = row![
             text("Address:").size(size - 12).center().height(size),
-            container(mouse_area(address).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, 1)))).width(Length::FillPortion(4)),
+            container(
+                mouse_area(address) // mouse_area, so its interactive
+                .on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, 1)))).width(Length::FillPortion(4)
+            ),
             widget_fill(),
             button_hex,
             button_dec,
@@ -1081,33 +1095,37 @@ impl PaneMemory {
             Ok(()) => false
         };
 
-        let memory = if test {
+        let memory = if test { // out of bounds message, and button to reload
             container(column![
-                text("Read out of memory map bounds.").width(Length::Fill).center().style(style::error),
-                container(button(text("Reload to begining of program map")).on_press(Message::Pane(PaneMessage::MemoryReset(id)))).width(Length::Fill).center_x(Length::Fill)
+                text("Read out of memory map bounds.")
+                .width(Length::Fill).center().style(style::error),
+                container(
+                    button(text("Reload to begining of program map"))
+                    .on_press(Message::Pane(PaneMessage::MemoryReset(id)))
+                ).width(Length::Fill).center_x(Length::Fill)
             ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
         } else {
-            let data: &Vec<u8>= &self.data;
+            let data: &Vec<u8>= &self.data; // bytes
 
             let mut addresses: Vec<u64> = Vec::new();
-            let mut bytes: Vec<Vec<u8>> = if self.more_bytes {
+            let mut bytes: Vec<Vec<u8>> = if self.more_bytes { // creating the bytes columns
                 vec![Vec::new(); 8]
             } else {
                 vec![Vec::new(); 4]
             };
 
             let len = bytes.len();
-            let mut pointer = self.address - self.address % len as u64;
-            let start = pointer - self.read_address;
+            let mut pointer = self.address - self.address % len as u64; // address
+            let start = pointer - self.read_address; // start of the displayed bytes
 
-            for (i, byte) in data[start as usize..].iter().enumerate() {
+            for (i, byte) in data[start as usize..].iter().enumerate() { // iterating through the bytes, pushing the address every line
                 if i % len == 0 {
                     addresses.push(pointer);
                     pointer += len as u64;
                 };
 
-                bytes[i % len].push(*byte);
-                if i == 40*len - 1 { // 40 lines
+                bytes[i % len].push(*byte); // cycling the columns, incrementing the depth each lines
+                if i == 40*len - 1 { // 40 lines (more cant fit on the screen)
                     break;
                 }
             };
@@ -1124,9 +1142,9 @@ impl PaneMemory {
                 .into())
             );
 
-            let byte_columns: iced::widget::Row<'_, Message> = row(bytes.iter().map(|col| column(
+            let byte_columns: iced::widget::Row<'_, Message> = row(bytes.iter().map(|col| column( // we create columns seperately for nicer alignment
                 col.iter().map(|byte| text(
-                    self.format.form(*byte)
+                    self.format.form(*byte) // formatting the bytes
                 ).size(size - 5)
                 .height(size)
                 .center()
@@ -1138,19 +1156,19 @@ impl PaneMemory {
                 _ => Length::Shrink
             })
             .into())
-            ).spacing(match self.format {
+            ).spacing(match self.format { // custom spacing (each format takes up a different size)
                 ByteBase::Hex => 10,
                 ByteBase::Chr => 10,
                 ByteBase::Dec => 15
             });
 
-            container(mouse_area(
+            container(mouse_area( // for scrolling the contents
                 row![address_column, byte_columns]
                 .height(Length::Fill)
                 .width(Length::Fill)
                 .padding(5)
                 .spacing(20)
-            ).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, -3))))
+            ).on_scroll(move |delta| Message::Pane(PaneMessage::MemoryAddress(id, delta, -3)))) // same message, bigger increment and negatives
         };
 
         let content = container(column![
@@ -1178,7 +1196,7 @@ impl PaneCode {
 
         let size = 30;
 
-        let update_button = svg_button(
+        let update_button = svg_button( // to determine whether to display the file and position where we are stopped at
             "icons/view.svg",
             size,
             Some(if self.update {style::widget_svg_toggled} else {style::widget_svg}))
@@ -1195,15 +1213,17 @@ impl PaneCode {
 
         let source = bind.clone().unwrap();
 
-        let mut dirs: Vec<String> = source.keys().map(|path| String::from(path.to_str().unwrap())).collect();
+        let mut dirs: Vec<String> = source.keys().map(|path| String::from(path.to_str().unwrap())).collect(); // list of source dirs from the sourcemap
         dirs.sort();
-        dirs.dedup();
+        dirs.dedup(); // remove duplicates (because of different compilation units)
 
         let hash_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(dirs.clone(), self.dir.clone(), move |path| Message::Pane(PaneMessage::CodeSelectDir(id, path)));
 
-        let mut files: Vec<String> = source[&PathBuf::from(self.dir.clone().unwrap_or(dirs[0].clone()))].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
+        let mut files: Vec<String> = source[ //list of files from the source dir
+            &PathBuf::from(self.dir.clone().unwrap_or(dirs[0].clone()))
+        ].iter().map(|file| String::from(file.path.to_str().unwrap())).collect();
         files.sort();
-        files.dedup();
+        files.dedup(); // remove duplicates (because of different compilation units)
 
         let file_list: pick_list::PickList<'_, String, Vec<String>, String, Message> = pick_list(files, self.file.clone(), move |path| Message::Pane(PaneMessage::CodeSelectFile(id, path)));
 
@@ -1211,11 +1231,11 @@ impl PaneCode {
             Some(file) => {
                 let comp_path = PathBuf::from(self.dir.as_ref().unwrap());
                 let file_path = PathBuf::from(file);
-                let code = self.code_display(comp_path, file_path, source, &state.internal.pane.file);
+                let code = self.code_display(comp_path, file_path, source, &state.internal.pane.file); // err if not contents
                 if code.is_ok() {
                     container(scrollable(
                     code.unwrap()
-                    ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+                    ).direction(scrollable::Direction::Both { vertical: scrollbar(), horizontal: scrollbar() })
                     .height(Length::Fill)
                     .width(Length::Fill)
                     .id(self.scrollable.clone())
@@ -1231,7 +1251,12 @@ impl PaneCode {
 
         container(
             column![
-                row![hash_list, file_list, widget_fill(), update_button].spacing(10).padding(3).height(size+6),
+                row![
+                    hash_list,
+                    file_list,
+                    widget_fill(),
+                    update_button
+                ].spacing(10).padding(3).height(size+6),
                 code
             ]
         ).style(style::back)
@@ -1257,7 +1282,7 @@ impl PaneCode {
             })
         );
 
-        let highlight = match line {
+        let highlight = match line { // getting the current line, if we are in the correct source file
             Some(index) => {
                 let real_name = &source.index_with_line(index).path;
                 if index.hash_path == comp_path && file_path == *real_name {
@@ -1289,8 +1314,6 @@ impl PaneCode {
         .padding(5))
     }
 
-
-
 }
 impl Default for PaneCode {
     fn default() -> Self {
@@ -1312,8 +1335,8 @@ impl PaneInfo {
     if bind.is_none() {
         return program_message("Load the program to display ELF info.");
     };
-    let file = match &bind.as_ref().unwrap().object {
-        ::object::File::Elf64(elf) => elf,
+    let file = match &bind.as_ref().unwrap().object { // we create the object file from the bytes, to get the formating data of the ELF header
+        object_foreign::File::Elf64(elf) => elf,
         _ => panic!()
     };
 
@@ -1334,11 +1357,20 @@ impl PaneInfo {
     let size = 20;
 
     let field = column(info.iter().map(|(field, _)| {
-        text(field.to_string()).size(size-5).center().height(size).wrapping(text::Wrapping::None).into()
+        text(field.to_string())
+        .size(size-5)
+        .center()
+        .height(size)
+        .wrapping(text::Wrapping::None).into()
     }));
 
     let value = column(info.iter().map(|(_, value)| {
-        text(value.to_string()).size(size-5).center().height(size).style(style::widget_text).wrapping(text::Wrapping::None).into()
+        text(value.to_string())
+        .size(size-5)
+        .center()
+        .height(size)
+        .style(style::widget_text)
+        .wrapping(text::Wrapping::None).into()
     }));
 
     let data = row![
@@ -1350,7 +1382,7 @@ impl PaneInfo {
     ).width(Length::Fill).height(Length::Fill).style(style::back)
 }
 }
-struct InfoNamed;
+struct InfoNamed; // for displaying the ELF header
 impl InfoNamed {
     fn class(x: u8) -> &'static str {
         match x {
@@ -1443,8 +1475,8 @@ impl PaneTerminal {
 
         let output = container(
             scrollable(
-                text(format!("{}_", state.internal.pane.output)).size(size-5).line_height(0.95)
-            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+                text(format!("{}_", state.internal.pane.output)).size(size-5).line_height(0.95) // displaying text and cursor
+            ).direction(scrollable::Direction::Both { vertical: scrollbar(), horizontal: scrollbar() })
             .anchor_bottom()
             .anchor_left()
             .height(Length::Fill)
@@ -1476,7 +1508,7 @@ impl PaneStack {
             }
         };
 
-        if self.unique != state.internal.pane.unique_stack {
+        if self.unique != state.internal.pane.unique_stack { // if the uniques dont match up, we have old data (we display button to update)
             return container(column![
                 text("Old Stack Data").width(Length::Fill).center(),
                 container(button(text("Update Stack")).on_press(Message::Pane(PaneMessage::StackUpdate(id)))).width(Length::Fill).center_x(Length::Fill)
@@ -1485,15 +1517,15 @@ impl PaneStack {
 
         let size: u16 = 23;
 
-        let open_vec = &self.open;
+        let open_vec = &self.open; // sets which lines are displayed
 
         let mut collapse = column![].width(size);
         let mut lines = column![];
 
         for (i, open) in open_vec.iter().enumerate() {
-            if !open {continue;}
+            if !open {continue;} // skipping the hidden ones
             let (depth, line) = &stack[i];
-            let data = if *depth == 0 {
+            let data = if *depth == 0 { // funtion lines
                 text(line).style(style::widget_text)
             } else {
                 text(line)
@@ -1503,7 +1535,7 @@ impl PaneStack {
                 .padding(padding::left(size*depth.checked_sub(1).unwrap_or(0) as u16)) // removing the indent on the closing brackets of params, while keeping correct collapse rules
             );
             match stack.get(i+1) {
-                Some((next_depth, _)) => if next_depth > depth {
+                Some((next_depth, _)) => if next_depth > depth { // if next line has greater indent, we generate a collapse button
                     collapse = collapse.push(Self::collapse_button(open_vec[i+1], i, size, id));
                 } else {
                     collapse = collapse.push(container("").height(size));
@@ -1515,14 +1547,14 @@ impl PaneStack {
         let content = container(
             scrollable(
                 row![collapse, lines].padding(padding::Padding {bottom: 10., right: 10., ..Default::default()}) // padding for the scrollbars
-            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+            ).direction(scrollable::Direction::Both { vertical: scrollbar(), horizontal: scrollbar() })
             .width(Length::Fill)
             .height(Length::Fill)
         ).style(style::back);
         content
     }
 
-    fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane) -> button::Button<'a, Message> {
+    fn collapse_button<'a>(open: bool, index: usize, size: u16, id: pane_grid::Pane) -> button::Button<'a, Message> { // if open, then we create the close one, and vice versa
         if open {
             svg_button("icons/collapse.svg", size, Some(style::collapse_svg))
             .on_press(Message::Pane(PaneMessage::StackCollapse(id, index)))
@@ -1557,17 +1589,17 @@ impl PaneAssembly {
             let addresses = column(
                 assembly.addresses.iter().map(|address|
                     if address == &rip {
-                        text(format!("0x{:06x}", address)).style(style::line).font(BOLD)
+                        text(format!("0x{:06x}", address)).style(style::line).font(BOLD) //highlight if its the current rip
                     } else {
                         text(format!("0x{:06x}", address)).style(style::weak)
                     }.size(size-12).center().height(size-5).into()
                 )
             );
 
-            let bytes = text(&assembly.bytes)
+            let bytes = text(&assembly.bytes) // displaying the bytes
             .size(size-12).line_height(iced::Pixels((size-5) as f32));
 
-            let instructions = text(&assembly.text)
+            let instructions = text(&assembly.text) // displaying the disassembled instructions
             .size(size-12).line_height(iced::Pixels((size-5) as f32));
 
             scrollable(
@@ -1579,7 +1611,7 @@ impl PaneAssembly {
                     container("").width(10),
                     instructions
                 ]
-            ).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::new(), horizontal: scrollable::Scrollbar::new() })
+            ).direction(scrollable::Direction::Both { vertical: scrollbar(), horizontal: scrollbar() })
             .id(self.scrollable.clone())
             .height(Length::Fill)
             .width(Length::Fill)
@@ -1643,7 +1675,7 @@ pub enum PaneMessage { // Messages regarding the Panes themselves
 
 // Contents
 
-pub fn content(state: &State) -> Container<'_, Message> {
+pub fn content(state: &State) -> Container<'_, Message> { // graphics of the entire UI
     container(column(
         if state.layout.status_bar {vec![
             toolbar(state, 45).into(),
@@ -1658,7 +1690,7 @@ pub fn content(state: &State) -> Container<'_, Message> {
 
 fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 
-    fn buttons<'a>(state: &State, size: u16) -> [button::Button<'a, Message>; 4] {
+    fn buttons<'a>(state: &State, size: u16) -> [button::Button<'a, Message>; 4] { // just a wrapper for the buttons
         let load_file = svg_button("icons/load_file.svg", size, None).on_press(Message::Operation(Operation::LoadFile)).style(style::bar_button);
 
         // Toggle buttons:
@@ -1710,7 +1742,7 @@ fn toolbar<'a>(state: &State, height: usize) -> Container<'a, Message> {
 }
 
 fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
-    fn status_text<'a>(string: String, mut content: Row<'a, Message>, size: u16, style: Option<impl Fn(&Theme) -> text::Style + 'a>) -> Row<'a, Message> {
+    fn status_text<'a>(string: String, mut content: Row<'a, Message>, size: u16, style: Option<impl Fn(&Theme) -> text::Style + 'a>) -> Row<'a, Message> { // appending the text of the status bar
         content = if style.is_some() {
             content.push(
                 text(string).size(size).center().style(style.unwrap())
@@ -1728,18 +1760,18 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
     let size = height - 7;
     let mut content: Row<'_, Message> = row![];
 
-    content = match FILE.access().as_ref() {
+    content = match FILE.access().as_ref() { // File name
         None => status_text("File not loaded.".to_string(), content, size, default),
         Some(file) => status_text(format!("File: {}", file.file_name().unwrap().to_str().unwrap()), content, size, Some(style::widget_text)),
     };
     content = content.push(delimiter(10));
 
-    content = match PID.access().as_ref() {
+    content = match PID.access().as_ref() { // pid
         None => status_text("Program not running".to_string(), content, size, default),
         Some(pid) => status_text(format!("Pid: {}", pid), content, size, Some(style::widget_text)),
     };
 
-    if PID.access().is_some() {
+    if PID.access().is_some() { // if pid, display the current state of the tracee
         content = content.push(delimiter(10));
 
         if state.internal.stopped {
@@ -1775,7 +1807,7 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
     }
 
     match state.status {
-        Some(nix::sys::wait::WaitStatus::Exited(pid, ecode)) => {
+        Some(nix::sys::wait::WaitStatus::Exited(pid, ecode)) => { // if no pid but exited status, display exit code
             content = content.push(delimiter(10));
             let msg = format!("Program with pid {pid} exited: {ecode:-}");
             content = status_text(msg, content, size, Some(style::error));
@@ -1794,7 +1826,7 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
 // MainFrame
 
 fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
-    container(
+    container( // creating the pane_grid for the main_frame
         pane_grid(
             &state.layout.panes,
             |id, pane, _maximized| pane_view(id, pane, state)
@@ -1810,7 +1842,7 @@ fn main_frame<'a>(state: &'a State) -> Container<'a, Message> {
     .height(Length::Fill)
 }
 
-fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_grid::Content<'a, Message> {
+fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_grid::Content<'a, Message> { // selecting the view function of each pane
     let (content, titlebar) = match pane {
         Pane::Control(control) => (control.view(state, id), pane_titlebar("Control", "icons/pane_control.svg")),
         Pane::Registers(registers) => (registers.view(id), pane_titlebar("Registers", "icons/pane_registers.svg")),
@@ -1827,7 +1859,7 @@ fn pane_view<'a>(id: pane_grid::Pane, pane: &'a Pane, state: &'a State) -> pane_
     pane_grid::Content::new(content).title_bar(titlebar)
 }
 
-fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, Message> {
+fn pane_titlebar<'a>(title: &'a str, icon: &'a str) -> pane_grid::TitleBar<'a, Message> { // pane title bar
     let height = 25;
     pane_grid::TitleBar::new(
         row![
@@ -1856,7 +1888,7 @@ pub fn code_panes_update(state: &mut State) -> Option<(Task<Message>, Task<Messa
     let mut load_tasks = Vec::new();
 
     let panes = &mut state.layout.panes;
-    for (id, pane) in panes.iter_mut() {
+    for (id, pane) in panes.iter_mut() { // for each code pane that has update set to true, calculate the task to move to the current line and file
         let data = match pane {
             Pane::Code(inner) => inner,
             _ => continue
@@ -1870,7 +1902,7 @@ pub fn code_panes_update(state: &mut State) -> Option<(Task<Message>, Task<Messa
         load_tasks.push(load);
     }
 
-    Some((
+    Some(( //2 batches of tasks
         Task::batch(scroll_tasks),
         Task::batch(load_tasks)
     ))
@@ -1878,38 +1910,40 @@ pub fn code_panes_update(state: &mut State) -> Option<(Task<Message>, Task<Messa
 
 fn code_update(id: pane_grid::Pane, file: &SourceIndex, pane: &mut PaneCode) -> (Task<Message>, Task<Message>) {
     let size = 25;
+    // we find the new dir and new file
     let new_dir = Some(file.hash_path.to_str().unwrap().to_string());
     let file_name = SOURCE.access().as_ref().unwrap().index_with_line(file).path.clone().to_str().unwrap().to_string();
 
+    // we calculate the pixel offset of the line we are stopped at (-3 gives us 3 lines from the top)
     let offset = ((file.line as i32 - 3) * size).max(0);
     let scroll = scrollable::AbsoluteOffset {x: 0., y: offset as f32};
-
 
     if new_dir == pane.dir && Some(file_name.clone()) == pane.file {
         let view = match pane.viewport {
             Some(view) => view,
-            None => return (scrollable::scroll_to(pane.scrollable.clone(), scroll), Task::none())
+            None => return (scrollable::scroll_to(pane.scrollable.clone(), scroll), Task::none()) // if no viewport, we always scroll
         };
+        // we get our current view
         let start = view.absolute_offset().y;
-        let end = (view.bounds().height - 6.*size as f32).max(0.);
+        let end = (view.bounds().height - 6.*size as f32).max(0.); // -6 gives us 3 lines from the bottom (because start is at 3 lines from the top)
         let range = start..start+end;
 
-        if range.contains(&(offset as f32)) {
+        if range.contains(&(offset as f32)) { // we scroll only if outside
             return (Task::none(), Task::none());
         };
-        if offset as f32 > range.end {
+        if offset as f32 > range.end { // if above the line, we scroll to fit the downwards side, otherwise we scroll to align the highlited line as 3 lines from the top
             let scroll = scrollable::AbsoluteOffset { x: 0., y: offset as f32 - end};
             (scrollable::scroll_to(pane.scrollable.clone(), scroll), Task::none())
         } else {
             (scrollable::scroll_to(pane.scrollable.clone(), scroll), Task::none())
         }
-    } else {
+    } else { // if new dir or file, then we select and scroll
         pane.dir = new_dir;
         (scrollable::scroll_to(pane.scrollable.clone(), scroll), Task::done(Message::Pane(PaneMessage::CodeSelectFile(id, file_name))))
     }
 }
 
-pub fn check_for_code(state: &mut State) -> bool {
+pub fn check_for_code(state: &mut State) -> bool { // we check if we have any code panes (for performance)
     for (_, pane) in state.layout.panes.iter() {
         match pane {
             Pane::Code(_) => return true,
@@ -1923,9 +1957,9 @@ pub fn check_for_code(state: &mut State) -> bool {
 
 pub fn assembly_scroll(state: &mut State, line: usize, task: &mut Option<Task<Message>>) {
     let panes = &state.layout.panes;
-    let offset = scrollable::AbsoluteOffset { x: 0., y: (25.*(line as f32 - 3.)).max(0.)};
+    let offset = scrollable::AbsoluteOffset { x: 0., y: (25.*(line as f32 - 3.)).max(0.)}; // we scroll to the middle -3 lines as the highlight is always in the middle
 
-    for (_, pane) in panes.iter() {
+    for (_, pane) in panes.iter() { // for each assembly pane
         match pane {
             Pane::Assembly(data) => {
                 *task = Some(scrollable::scroll_to(data.scrollable.clone(), offset))
@@ -1935,7 +1969,7 @@ pub fn assembly_scroll(state: &mut State, line: usize, task: &mut Option<Task<Me
     };
 }
 
-pub fn check_for_assembly(state: &mut State) -> bool {
+pub fn check_for_assembly(state: &mut State) -> bool { // we check if we have any assembly panes (for performance)
     for (_, pane) in state.layout.panes.iter() {
         match pane {
             Pane::Assembly(_) => return true,
@@ -1947,7 +1981,7 @@ pub fn check_for_assembly(state: &mut State) -> bool {
 
 // PaneMessage Handle (Mainframe Operations)
 
-fn get_pane<'a>(panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane) -> &'a mut Pane {
+fn get_pane<'a>(panes: &'a mut pane_grid::State<Pane>, pane: pane_grid::Pane) -> &'a mut Pane { //pane wrapper
     panes.get_mut(pane).unwrap()
 }
 
@@ -1960,7 +1994,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         // Registers
         PaneMessage::RegistersChangeFormat(pane, base) => get_pane(panes, pane).registers().format = base,
         // Code
-        PaneMessage::CodeSelectDir(pane, dir) => {
+        PaneMessage::CodeSelectDir(pane, dir) => { // setting the directory and reseting the file (unless the same one has been selected)
             let data = get_pane(panes, pane).code();
             data.viewport = None;
             if data.dir == Some(dir.clone()) {
@@ -1969,7 +2003,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             data.dir = Some(dir);
             data.file = None;
         },
-        PaneMessage::CodeSelectFile(pane, file) => {
+        PaneMessage::CodeSelectFile(pane, file) => { // setting the file and creating the breakpoints task
             let data = get_pane(panes, pane).code();
             data.file = Some(file.clone()); //file select
             data.viewport = None;
@@ -1989,7 +2023,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             };
 
             let index = code.1;
-            if code.0.content.is_some() { //Conditional file load
+            if code.0.content.is_some() { //Conditional file load (if we dont have the contents)
                 *task = Some(crate::trace::task_breapoints(
                     comp_dir,
                     index,
@@ -2009,7 +2043,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             );
             *task = Some(load)
         },
-        PaneMessage::CodeLoad(pane, index, text) => {
+        PaneMessage::CodeLoad(pane, index, text) => { // if file contents loaded, create also the breakpoints, if the id of the pane is provided
             let count = text.lines().count();
             SOURCE.access().as_mut().unwrap()
             .index_mut(&index).content = Some(text);
@@ -2023,10 +2057,10 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
                 *task = Some(load)
             }
         }
-        PaneMessage::CodeBreakpoints(pane, breakpoints) => {
+        PaneMessage::CodeBreakpoints(pane, breakpoints) => { // sets the breakpoints
             get_pane(panes, pane).code().breakpoints = breakpoints;
         },
-        PaneMessage::CodeToggleUpdate(pane) => {
+        PaneMessage::CodeToggleUpdate(pane) => { // toggle the update bool, if newly true, perform update right away to find the highlight line
             let data = get_pane(panes, pane).code();
             data.update ^= true;
             if data.update && state.internal.pane.file.is_some() {
@@ -2040,22 +2074,22 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
         PaneMessage::MemoryToggleSize(pane) => get_pane(panes, pane).memory().more_bytes ^= true,
         PaneMessage::MemoryInput(pane, data) => get_pane(panes, pane).memory().field = data,
         PaneMessage::MemoryPaste(pane, data) => get_pane(panes, pane).memory().field = data,
-        PaneMessage::MemorySubmit(pane) => {
+        PaneMessage::MemorySubmit(pane) => { // we try converting both, choosing the one that is correct, prefering dec (because hex contains dec)
             let data = get_pane(panes, pane).memory();
             let field = &data.field;
-            let hex = u64::from_str_radix(field.get(2..).unwrap_or("g"), 16);
+            let hex = u64::from_str_radix(field.get(2..).unwrap_or("g"), 16); // g to produce a convesion error
             let dec = u64::from_str_radix(field, 10);
             if hex.is_err() && dec.is_err() {
-                data.incorrect = true;
+                data.incorrect = true; // if not a number
                 return;
             };
-            let num = match hex {
+            let num = match dec {
                 Ok(num) => num,
-                Err(_) => dec.unwrap()
+                Err(_) => hex.unwrap()
             };
             data.address = num;
-            data.incorrect = false;
-            update_memory(data);
+            data.incorrect = false; // reset the NaN error
+            update_memory(data); // we trigger update memory check
         },
         PaneMessage::MemoryAddress(pane, delta, mult) => {
             let data = get_pane(panes, pane).memory();
@@ -2063,7 +2097,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
                 iced::mouse::ScrollDelta::Lines { x: _, y } => y*mult as f32,
                 iced::mouse::ScrollDelta::Pixels { x: _, y } => y*mult as f32,
             };
-            if data.more_bytes {
+            if data.more_bytes { // limiting the address in u64 bounds AND if outside of the alignment, then first align to the closest, then continue normally
                 let round = data.address % (8*mult.abs() as u64);
                 if y > 0. {
                     data.address = data.address + 8*mult.abs() as u64 - (data.address % (8*mult.abs() as u64)) ;
@@ -2079,7 +2113,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
                         }
                     }
                 }
-            } else {
+            } else { // 8 and 4 byte alignment
                 let round = data.address % (4*mult.abs() as u64);
                 if y > 0. {
                     data.address = data.address + 4*mult.abs() as u64 - data.address % (4*mult.abs() as u64);
@@ -2096,17 +2130,17 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
                     }
                 }
             };
-            let hex_check = data.field.get(0..2);
+            let hex_check = data.field.get(0..2); // we check for hexadecimal, to keep the previous format
             if hex_check.is_none() || hex_check.unwrap() == "0x" {
                 data.field = format!("0x{:x}",data.address);
             } else {
                 data.field = format!("{}",data.address);
             }
-            data.incorrect = false;
+            data.incorrect = false; // reset the NaN error
             update_memory(data);
         },
         PaneMessage::MemoryReset(pane) => {
-            let data = get_pane(panes, pane).memory();
+            let data = get_pane(panes, pane).memory(); // we get the beginning of the memory (from tge memory maps)
             let mut beginning = 0;
             if state.internal.static_exec {
                 for map in MAPS.access().as_ref().unwrap() {
@@ -2120,13 +2154,13 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             };
             data.address = beginning;
             let hex_check = data.field.get(0..2);
-            if hex_check.is_none() || hex_check.unwrap() == "0x" {
+            if hex_check.is_none() || hex_check.unwrap() == "0x" { // check for hexadecimal to keep the previous format
                 data.field = format!("0x{:x}",data.address);
             } else {
                 data.field = format!("{}",data.address);
             }
-            data.incorrect = false;
-            update_memory(data);
+            data.incorrect = false; // reset the NaN error
+            update_memory(data); // we trigger update memory
         },
         // Terminal
         PaneMessage::TerminalType(pane, data) => get_pane(panes, pane).terminal().input = data,
@@ -2135,13 +2169,13 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             let data = get_pane(panes, pane).terminal();
             data.input.push('\n');
 
-            if object::stdio().unwrap().write(data.input.as_bytes()).is_err() {
+            if object::stdio().unwrap().write(data.input.as_bytes()).is_err() { // we write to the PTY with a newline attached
                 return;
             };
-            data.input.clear();
+            data.input.clear(); // and clear the input
         },
         // Assembly
-        PaneMessage::AssemblyUpdate(result) => {
+        PaneMessage::AssemblyUpdate(result) => { // setting the newly produced assembly, and scrolling the panes
             match result {
                 Ok((assembly, line)) => {
                     state.internal.pane.assembly = Some(assembly);
@@ -2151,7 +2185,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
             }
         }
         // Stack
-        PaneMessage::StackUpdate(pane) => {
+        PaneMessage::StackUpdate(pane) => { // creating the open vec from the new stack data, and setting the unique to be the same as the global
             let data = get_pane(panes, pane).stack();
             data.unique = state.internal.pane.unique_stack;
             if state.internal.pane.stack.is_none() {return;}
@@ -2260,10 +2294,10 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
     pane.data = data.unwrap();
 }
 
-fn stack_open(stack: &Vec<(usize, String)>, pane: &mut PaneStack, line: usize, open: bool) {
+fn stack_open(stack: &Vec<(usize, String)>, pane: &mut PaneStack, line: usize, open: bool) { // we expand or collapse the lines until we get to the same level again
     let upper = stack[line].0;
     let open_vec = &mut pane.open;
-    for (i, (depth, _)) in stack.iter().skip(line+1).enumerate() {
+    for (i, (depth, _)) in stack.iter().skip(line+1).enumerate() { // skipping the first lines
         if *depth == upper {break;}
         open_vec[i+line+1] = open;
     };
@@ -2281,25 +2315,22 @@ pub fn layout_message(state: &mut State, message: LayoutMessage) {
         LayoutMessage::Drag(pane_grid::DragEvent::Dropped {pane, target}) => {
             match target {
                 pane_grid::Target::Pane(target_pane, _) => state.layout.panes.swap(pane, target_pane),
-                //pane_grid::Target::Edge(edge) => state.layout.panes.drop(pane, pane_grid::Target::Edge(edge))
                 _ => ()
             };
         }
         LayoutMessage::Resize(pane_grid::ResizeEvent {split, ratio}) => {
-            //state.layout.panes.resize(split, ratio)
             resize(&mut state.layout, split, ratio);
         }
-        //fill in later
         _ => ()
     };
 }
 
 fn layout(layout: &mut Layout, pane: LayoutMessage) { // layout update
-    let (main, left, right, panel) = layout.get_nodes();
-    let mut saved_state = SAVED_STATE.access().clone().unwrap();
+    let (main, left, right, panel) = layout.get_nodes(); // gets the parts
+    let mut saved_state = SAVED_STATE.access().clone().unwrap(); 
 
     saved_state.main = Some(layout.node_to_configuration(&main));
-    match left {
+    match left {// updates the SAVED STATE as we are getting rid of some panes
         Some(node) => saved_state.left_sidebar = (layout.node_to_configuration(&node.0), node.1),
         _ => ()
     };
@@ -2316,7 +2347,7 @@ fn layout(layout: &mut Layout, pane: LayoutMessage) { // layout update
         LayoutMessage::SidebarLeftToggle => layout.sidebar_left ^= true,
         LayoutMessage::SidebarRightToggle => layout.sidebar_right ^= true,
         LayoutMessage::PanelToggle => {
-            if layout.panel_mode == config::PanelMode::left {
+            if layout.panel_mode == config::PanelMode::left { // if panel mode left and we toggle the panel, we need to recalculate the ratios (as the configuration is getting changed)
                 if layout.panel {
                     let new_left_ratio = (saved_state.left_sidebar.1 as f64)*(saved_state.right_sidebar.1 as f64);
                     let new_right_ratio = (1.0 - saved_state.right_sidebar.1 as f64)/(1.0 - new_left_ratio);
@@ -2334,15 +2365,15 @@ fn layout(layout: &mut Layout, pane: LayoutMessage) { // layout update
         _ => ()
     };
 
-    SAVED_STATE.sets(saved_state.clone());
+    SAVED_STATE.sets(saved_state.clone()); // we set the update parts
 
-    let base = Layout::base(layout.sidebar_left, layout.sidebar_right, layout.panel, &layout.panel_mode, saved_state);
+    let base = Layout::base(layout.sidebar_left, layout.sidebar_right, layout.panel, &layout.panel_mode, saved_state); // create a new base from the parts
 
-    layout.panes = pane_grid::State::with_configuration(base);
+    layout.panes = pane_grid::State::with_configuration(base); // and finally set the new state from the configuration
 }
 
 fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big resize logic function (mainly because of sidebars)
-    if layout.panel_mode == config::PanelMode::left && layout.panel {
+    if layout.panel_mode == config::PanelMode::left && layout.panel { // opposite rules (because of the configuration)
         if !layout.sidebar_right {
             layout.panes.resize(split, ratio);
             return;
@@ -2379,7 +2410,7 @@ fn resize(layout: &mut Layout, split: pane_grid::Split, ratio: f32) { // big res
         return;
     }
 
-    if layout.sidebar_right {
+    if layout.sidebar_right { // if right sidebar is present, then we just use the resize function, otherwise we resize the saved state
         let (right, right_old_ratio) = layout.get_right_split();
         let new_ratio = (1.0 - (1.0 - (right_old_ratio * (1.0 - left_old_ratio)) - left_old_ratio) - ratio as f64)/(1.0 - ratio as f64);
         layout.panes.resize(left, limit(ratio));
@@ -2443,6 +2474,14 @@ impl ByteBase {
 
 // Widgets helpers
 
+fn scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new().scroller_width(0).width(0)
+}
+
+fn no_scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new().scroller_width(0).width(0)
+}
+
 fn svg_button<'a>(icon: &str, size: u16, svg_style: Option<fn(&Theme, svg::Status) -> svg::Style>) -> button::Button<'a, Message> {
     button(
         svg(Handle::from_memory(Asset::get(icon).unwrap().data))
@@ -2453,7 +2492,7 @@ fn svg_button<'a>(icon: &str, size: u16, svg_style: Option<fn(&Theme, svg::Statu
     .width(size)
 }
 
-fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> {
+fn breakpoint_button<'a>(address: Option<u64>, size: u16) -> button::Button<'a, Message> { // if address in the breakpoints, then toggled
     match address {
         Some(address) => {
             let present = BREAKPOINTS.access().as_ref().unwrap().contains_key(&address);
