@@ -61,6 +61,5 @@ int main() {
     int b = 20;
     int c = plus(a,b);
     char j[4] = "Ahoj";
-    char *x = *j;
     return 0;
 }

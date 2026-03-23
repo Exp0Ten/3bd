@@ -11,7 +11,6 @@ use iced::{
         button,
         column,
         row,
-
         svg,
         pane_grid,
         pick_list,
@@ -406,7 +405,7 @@ impl Layout {
         }
     }
 
-    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE // function to find the LEFT sidebar based on layout state
+    fn get_left_split(&self) -> (pane_grid::Split, f64) { // caller must know that the side bar IS ACTUALLY ACTIVE // function to find the LEFT Split based on layout state
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
@@ -441,7 +440,7 @@ impl Layout {
         }
     }
 
-    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE // function to find the RIGHT sidebar based on layout state
+    fn get_right_split(&self) -> (pane_grid::Split, f64) { // caller must know that BOTH sidebars ARE ACTUALLY ACTIVE // function to find the RIGHT Split based on layout state
         if self.panel { match self.panel_mode {
             config::PanelMode::full => match self.panes.layout() {
                 pane_grid::Node::Split { a, ..} => match *a.clone() {
@@ -1105,16 +1104,16 @@ impl PaneMemory {
                 ).width(Length::Fill).center_x(Length::Fill)
             ]).center(Length::Fill).width(Length::Fill).height(Length::Fill)
         } else {
-            let data: &Vec<u8>= &self.data; // bytes
+            let data: &Vec<u8> = &self.data; // bytes
 
             let mut addresses: Vec<u64> = Vec::new();
-            let mut bytes: Vec<Vec<u8>> = if self.more_bytes { // creating the bytes columns
+            let mut bytes: Vec<Vec<u8>> = if self.more_bytes { // creating the byte columns
                 vec![Vec::new(); 8]
             } else {
                 vec![Vec::new(); 4]
             };
 
-            let len = bytes.len();
+            let len = bytes.len(); // 4 or 8 format
             let mut pointer = self.address - self.address % len as u64; // address
             let start = pointer - self.read_address; // start of the displayed bytes
 
@@ -2220,7 +2219,7 @@ pub fn pane_message<'a>(state: &'a mut State, message: PaneMessage, task: &mut O
 }
 
 
-pub fn source_content(file: PathBuf) -> Option<String> {
+pub fn source_content(file: PathBuf) -> Option<String> { // reading and processing the source file
     match object::read_source(&file) {
         Ok(mut data) => Some({
             process_string(&mut data);
@@ -2230,7 +2229,7 @@ pub fn source_content(file: PathBuf) -> Option<String> {
     }
 }
 
-pub fn create_breakpoints(comp_path: PathBuf, index: usize, len: usize) -> Vec<Option<u64>> {
+pub fn create_breakpoints(comp_path: PathBuf, index: usize, len: usize) -> Vec<Option<u64>> { // creates breakpoints each time the file is selected, to save performance
     let bind = LINES.access();
     let lines = bind.as_ref().unwrap();
 
@@ -2242,7 +2241,7 @@ pub fn create_breakpoints(comp_path: PathBuf, index: usize, len: usize) -> Vec<O
         index
     };
 
-    for i in 0..len {
+    for i in 0..len { // for each line we create breakpoint with the corresponding address (or None if the line doesn't have an address)
         line.line = i as u64 + 1;
         buf.push(lines.get_address(&line));
     }
@@ -2250,11 +2249,11 @@ pub fn create_breakpoints(comp_path: PathBuf, index: usize, len: usize) -> Vec<O
     buf
 }
 
-pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
+pub fn update_memory(pane: &mut PaneMemory) { // Function Handling the bytes load to save performance
     let current = pane.address;
     let limit = pane.read_address;
 
-    match test_memory(current) {
+    match test_memory(current) { // if we are outside of bounds, then we trigger read error
         Err(true) => {
             pane.read_error = true;
             return;
@@ -2262,36 +2261,36 @@ pub fn update_memory(pane: &mut PaneMemory) { // Works, Tested FR THIS TIME
         _ => ()
     };
 
-    let mut new = if (current < limit + 4096 / 8) || (current > limit + 7*(4096 / 8)) {
+    let mut new = if (current < limit + 4096 / 8) || (current > limit + 7*(4096 / 8)) { // if we are close the bounds of the LAST read, or outside of them, we load new data
         (current - current % 8) - 2048 // radius
     } else {
         return; // we are still well within the bounds so no need to reload the data
     };
 
     match test_memory(new) {
-        Err(true) => new = get_map_range(current).unwrap().start,
+        Err(true) => new = get_map_range(current).unwrap().start, // if we are close to the beginning of the MAP, we set it to the start of the map
         _ => ()
     };
 
-    match test_memory(new + 2048) {
+    match test_memory(new + 2048) { // if the new load would read past the current MAP, we set the beginning to be 4KB ahead of the end (reading all of the last 4096 bytes of the MAP)
         Err(false) => new = get_map_range(current).unwrap().end - 4096,
         _ => ()
     };
 
-    if new == limit {
+    if new == limit { // if last read address is the same as the new read, we already have the correct data
         return; // we have already done this
     };
 
     pane.read_address = new;
 
-    let data = read_memory(new, 4096);
-    if data.is_err() { // some error idk
+    let data = read_memory(new, 4096); // we get the memory data
+    if data.is_err() { // if read fails
         pane.read_error = true;
         return;
     }
 
-    pane.read_error = false;
-    pane.data = data.unwrap();
+    pane.read_error = false; // reseting the read error
+    pane.data = data.unwrap(); // setting the data
 }
 
 fn stack_open(stack: &Vec<(usize, String)>, pane: &mut PaneStack, line: usize, open: bool) { // we expand or collapse the lines until we get to the same level again
@@ -2522,7 +2521,7 @@ fn delimiter<'a>(width: usize) -> Container<'a, Message> {
     container("").width(Length::Fixed(width as f32)).height(Length::Fill)
 }
 
-fn program_message<'a>(msg: &'a str) -> Container<'a, Message> { // When the ui isnt active, use this container instead
+fn program_message<'a>(msg: &'a str) -> Container<'a, Message> { // When the ui widget isnt active, use this container instead
     container(text(msg).center().height(Length::Fill).width(Length::Fill))
     .height(Length::Fill)
     .width(Length::Fill)

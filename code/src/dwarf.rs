@@ -47,16 +47,16 @@ impl SourceFile {
         SourceFile {
             path: rel_path,
             compile_unit: unit_offset,
-            content: None
+            content: None // we load the contents when needed
         }
     }
 
-    fn get_unit_header<'a>(&self, dwarf: &'a Dwarf) -> UnitHeader<EndianSlice<'a, Endian>> {
+    fn _get_unit_header<'a>(&self, dwarf: &'a Dwarf) -> UnitHeader<EndianSlice<'a, Endian>> {
         dwarf.debug_info.header_from_offset(self.compile_unit).unwrap()
     }
 }
 
-pub type SourceMap = HashMap<PathBuf, Vec<SourceFile>>;
+pub type SourceMap = HashMap<PathBuf, Vec<SourceFile>>; // holds all of the source files mentioned in the LINE PROGRAMS
 
 pub trait ImplSourceMap {
     fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<(&SourceFile, usize)>;
@@ -67,7 +67,7 @@ pub trait ImplSourceMap {
 }
 
 impl ImplSourceMap for SourceMap {
-    fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<(&SourceFile, usize)> {
+    fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<(&SourceFile, usize)> { // we look for the file by name, returning the file and the index in the Vec
         let mut n = 0;
         for file in self.get(&comp_dir).unwrap() {
             if file.path == path {
@@ -78,10 +78,10 @@ impl ImplSourceMap for SourceMap {
         None
     }
 
-    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf {
+    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf { // gets the compilation directory from the unit, not the hash path
         PathBuf::from(
             dwarf.unit(
-                source_file.get_unit_header(&dwarf)
+                source_file._get_unit_header(&dwarf)
             ).unwrap()
             .comp_dir.unwrap()
             .to_string_lossy()
@@ -89,7 +89,7 @@ impl ImplSourceMap for SourceMap {
         )
     }
 
-    fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex {
+    fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex { // we input a new file into the SourceMap, returning the SourceIndex
         if self.contains_key(&hash_dir) {
             let v =self.get_mut(&hash_dir).unwrap();
             for i in 0..v.len() {
@@ -105,12 +105,12 @@ impl ImplSourceMap for SourceMap {
         }
     }
 
-    fn index_with_line(&self, line: &SourceIndex) -> &SourceFile {
+    fn index_with_line(&self, line: &SourceIndex) -> &SourceFile { // using the SourceIndex to get the file (fast operation)
         let vec = self.get(&line.hash_path).unwrap();
         &vec[line.index]
     }
 
-    fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile {
+    fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile { // using the SourceIndex but retrieving a mutable reference for the file
         let vec = self.get_mut(&line.hash_path).unwrap();
         vec.get_mut(line.index).unwrap()
     }
@@ -119,7 +119,7 @@ impl ImplSourceMap for SourceMap {
 #[derive(PartialEq, Clone, Debug)]
 pub struct SourceIndex {
     pub line: u64, // in the SourceFile
-    pub hash_path: PathBuf,
+    pub hash_path: PathBuf, // hashmap key in the SourceMap
     pub index: usize // in the SourceMap Vec
 }
 
@@ -133,7 +133,7 @@ impl SourceIndex {
     }
 }
 
-pub type LineAddresses = HashMap<u64, SourceIndex>;
+pub type LineAddresses = HashMap<u64, SourceIndex>; // saving the line and file for each address in the LINE PROGRAMS
 
 pub trait ImplLineAddresses<'a> {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex>;
@@ -142,15 +142,15 @@ pub trait ImplLineAddresses<'a> {
 }
 
 impl <'a> ImplLineAddresses<'a> for LineAddresses {
-    fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> {
+    fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex> { // we get the line from the real address
         match EXEC_SHIFT.access().as_ref() {
             Some(shift) => if *shift > address {return None},
             None => ()
         }
-        self.get(&normal(address))
+        self.get(&normal(address)) // normal to find the normalized address
     }
 
-    fn _get_source_file(&self, address: u64) -> Option<SourceFile> {
+    fn _get_source_file(&self, address: u64) -> Option<SourceFile> { // consuming the SourceIndex right away to get the source file
         match self.get(&normal(address)) {
             Some(line) => {
                 let bind = SOURCE.access();
@@ -161,7 +161,7 @@ impl <'a> ImplLineAddresses<'a> for LineAddresses {
         }
     }
 
-    fn get_address(&'a self, line: &SourceIndex) -> Option<u64> {
+    fn get_address(&'a self, line: &SourceIndex) -> Option<u64> { // getting the address for the SourceIndex (by iterating and matching)
         let keys = self.keys();
         for key in keys {
             let entry = &self[key];
@@ -173,12 +173,15 @@ impl <'a> ImplLineAddresses<'a> for LineAddresses {
     }
 }
 
+// gimli Type Definitions
 pub type Endian = gimli::RunTimeEndian;
 type Section<'data> = std::borrow::Cow<'data, [u8]>;
 pub type DwarfSections<'data> = gimli::DwarfSections<Section<'data>>;
 pub type Dwarf<'a> = gimli::Dwarf<EndianSlice<'a, gimli::RunTimeEndian>>;
+type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
 
-pub struct EhFrame<'a> {
+
+pub struct EhFrame<'a> { // holds the other debug info, outside of the DWARF data
     pub object: object::File<'a>,
     pub frame: std::borrow::Cow<'a, [u8]>,
     pub section_base: u64,
@@ -186,7 +189,7 @@ pub struct EhFrame<'a> {
 }
 
 impl <'a>EhFrame<'a> {
-    fn eh_frame(&'a self) -> gimli::EhFrame<EndianSlice<'a, Endian>> {
+    fn eh_frame(&'a self) -> gimli::EhFrame<EndianSlice<'a, Endian>> { // creates the parsed eh_frame object from the raw data
         gimli::EhFrame::new(&self.frame, ENDIAN.access().unwrap())
     }
 
@@ -204,16 +207,17 @@ impl <'a>EhFrame<'a> {
 }
 
 pub trait SectionsToDwarf {
-    fn dwarf(&self, endian: Endian) -> Dwarf;
+    fn dwarf(&self, endian: Endian) -> Dwarf<'_>;
 }
 
 impl SectionsToDwarf for DwarfSections<'_> { // we cannot save the the borrow in the globals, so this wrapper saves space
-    fn dwarf(&self, endian: Endian) -> Dwarf {
+    fn dwarf(&self, endian: Endian) -> Dwarf<'_> {
         self.borrow(|section| gimli::EndianSlice::new(Section::as_ref(section), endian))
     }
 }
 
-// Reading LINE_DATA
+
+// READING THE DWARF DATA
 
 pub fn load_dwarf(binary: &'static Vec<u8>) -> Result<(DwarfSections<'static>, object::File<'static>), ()> {
     let object = object::File::parse(&**binary).unwrap();
@@ -234,9 +238,8 @@ pub fn load_dwarf(binary: &'static Vec<u8>) -> Result<(DwarfSections<'static>, o
     Ok((dwarf_sections, object))
 }
 
-type Unit<'a> = gimli::Unit<EndianSlice<'a, gimli::RunTimeEndian>, usize>;
 
-pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli doesnt provide much better ways other than this, so ill leave comments
+pub fn load_source(dwarf: Dwarf) { // this funtion parses the line programs and creates the SourceMap and LineAddresses, gimli doesnt provide much better ways other than this, so ill leave comments
 
     // here we create the hashmaps
     let mut source_files = SourceMap::new();
@@ -310,7 +313,7 @@ pub fn load_source(dwarf: Dwarf) { // this is a hell of a function, but gimli do
     LINES.sets(line_addresses);
 }
 
-pub fn get_main_file() -> (String, String) {
+pub fn get_main_file() -> (String, String) { // getting the main file path from the main subprogram in the tracee
     let found = EHFRAME.access().as_ref().unwrap().main.is_some();
     let main_function = if found {
         EHFRAME.access().as_ref().unwrap().main.unwrap()
@@ -337,12 +340,12 @@ pub fn get_main_file() -> (String, String) {
 
 // FUNCTION RANGES
 
-type FunctionRange = std::ops::Range<u64>;
+type FunctionRange = std::ops::Range<u64>; // pc range for the function
 
 pub struct FunctionIndex<Unit = DebugInfoOffset, FunctionOffset = DebugInfoOffset> {
-    pub func_hash: HashMap<u64, FunctionOffset>,
-    pub range_hash: HashMap<Unit, Vec<FunctionRange>>,
-    pub subtype_parent: HashMap<FunctionOffset, String> //kinda optional, but VERY useful // TODO, later, dont save name, but .debug_string offset !! (well see)
+    pub func_hash: HashMap<u64, FunctionOffset>, // address of the start of the range mapped with the correspoding subprogram entry in DWARF
+    pub range_hash: HashMap<Unit, Vec<FunctionRange>>, // for faster lookup of the function (since we know the unit from the LINE PROGRAMS)
+    pub subtype_parent: HashMap<FunctionOffset, String> //kinda optional, but VERY useful (saves the parent of the function (filename/class/namespace)
 }
 
 impl FunctionIndex {
@@ -356,14 +359,14 @@ impl FunctionIndex {
 
     fn insert_function(&mut self, range: FunctionRange, function_entry: DebugInfoOffset ,unit: DebugInfoOffset, subtype_parent: Option<&str>) {
         let range_hash = &mut self.range_hash;
-        if range_hash.contains_key(&unit) {
+        if range_hash.contains_key(&unit) { // if we have the unit, we just push the new range, else we create a new vec with the range under the Unit
             range_hash.get_mut(&unit).unwrap().push(range.clone());
         } else {
             range_hash.insert(unit, vec![range.clone()]);
         }
         let func_hash = &mut self.func_hash;
-        func_hash.insert(range.start, function_entry);
-        match subtype_parent {
+        func_hash.insert(range.start, function_entry); // the DebugInfoOffset with the start of the range
+        match subtype_parent { // if we find a parent, we insert it for the function info
             Some(str) => {
                 let parent_hash = &mut self.subtype_parent;
                 parent_hash.insert(function_entry, str.to_string());
@@ -376,16 +379,16 @@ impl FunctionIndex {
         self.func_hash[&address]
     }
 
-    pub fn get_function(&self, address: u64, unit: DebugInfoOffset) -> Option<DebugInfoOffset> {
-        let range = match self.find_range(address, unit) {
+    pub fn get_function(&self, address: u64, unit: DebugInfoOffset) -> Option<DebugInfoOffset> { // fast iterating through units functions
+        let range = match self.find_range(address, unit) { // we get the range
             Some(range) => range,
             None => return None
         };
 
-        Some(self.direct_address(range.start))
+        Some(self.direct_address(range.start)) // and retrieve the Function Entry
     }
 
-    fn find_range(&self, address: u64, unit: DebugInfoOffset) -> Option<&FunctionRange> {
+    fn find_range(&self, address: u64, unit: DebugInfoOffset) -> Option<&FunctionRange> { // finds the range of the current function
         let ranges = &self.range_hash[&unit];
         for range in ranges {
             if range.contains(&address) {
@@ -395,7 +398,7 @@ impl FunctionIndex {
         None
     }
 
-    fn get_address(&self, function: DebugInfoOffset) -> Option<u64> {
+    fn get_address(&self, function: DebugInfoOffset) -> Option<u64> { // we find the starting address for the function entry
         for (address, info_offset) in self.func_hash.clone().into_iter() {
             if info_offset == function {
                 return Some(address);
@@ -405,7 +408,7 @@ impl FunctionIndex {
     }
 }
 
-pub fn parse_functions(dwarf: Dwarf) {
+pub fn parse_functions(dwarf: Dwarf) { // parsing the subprogram entries to create the FunctionIndex
     let mut function_index = FunctionIndex::new();
 
     let mut declarations: HashMap<DebugInfoOffset, &str>  = HashMap::new(); // mapping declaration function offset to its parent for later use, and they sit outside of units, in case some would be defined in different CU, although that is unlikely, also the reason for DebugInfoOffset instead
@@ -468,7 +471,7 @@ pub fn parse_functions(dwarf: Dwarf) {
 
             // getting the PC ranges
             if let Some(value) = entry.attr_value(gimli::DW_AT_ranges) { // if it uses ranges (eg. functions that have inner functions), then we push all of them
-                let range_offset = value.offset_value().unwrap();
+                let range_offset = number(value) as usize;
                 let mut ranges = dwarf.ranges.ranges(
                     gimli::RangeListsOffset(range_offset),
                     unit.encoding(),
@@ -552,8 +555,13 @@ fn get_unwind_for_address(address: u64, eh_frame: (&GimliEhFrame, &EhFrame) ) ->
     res
 }
 
-
-fn get_cfa(unwind: &UnwindInfo, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<u64, ()> {
+// CFA (Cannonical Frame Address) - "base" address of the function, DWARF uses this to retrieve the return address and unwind registers in general
+fn get_cfa(
+    unwind: &UnwindInfo,
+    regs: &mut nix::libc::user_regs_struct,
+    eh_frame: &GimliEhFrame,
+    encoding: gimli::Encoding
+) -> Result<u64, ()> {
     let cfa = unwind.row.as_ref().unwrap().cfa();
     match cfa {
         gimli::CfaRule::RegisterAndOffset {
@@ -571,7 +579,13 @@ fn get_cfa(unwind: &UnwindInfo, regs: &mut nix::libc::user_regs_struct, eh_frame
     }
 }
 
-fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<(), ()> {
+fn unwind_registers(
+    unwind: &UnwindInfo,
+    cfa: u64,
+    regs: &mut nix::libc::user_regs_struct,
+    eh_frame: &GimliEhFrame,
+    encoding: gimli::Encoding
+) -> Result<(), ()> {
     // register unwind rules
     let rules = unwind.row.as_ref().unwrap().registers();
     for (reg, rule) in rules { // we iterate through the rules
@@ -585,8 +599,14 @@ fn unwind_registers(unwind: &UnwindInfo, cfa: u64, regs: &mut nix::libc::user_re
     Ok(())
 }
 
-fn unwind_register(register_rule: &gimli::RegisterRule<usize>, cfa: u64, regs: &mut nix::libc::user_regs_struct, eh_frame: &GimliEhFrame, encoding: gimli::Encoding) -> Result<u64, ()> {
-    match register_rule {
+fn unwind_register(
+    register_rule: &gimli::RegisterRule<usize>,
+    cfa: u64,
+    regs: &mut nix::libc::user_regs_struct,
+    eh_frame: &GimliEhFrame,
+    encoding: gimli::Encoding
+) -> Result<u64, ()> {
+    match register_rule { // we match the rule, and perform the correct operation
         gimli::RegisterRule::Offset(addr_offset) => Ok(slice_to_u64(&unwind_memory((cfa as i64 + addr_offset) as u64, 8)?)),
         gimli::RegisterRule::Expression(expression) => {
             let expression = expression.get(eh_frame).unwrap();
@@ -648,10 +668,10 @@ fn eval_expression<'a>(
     frame_base: Option<u64>,
     encoding: gimli::Encoding
 ) -> Result<Vec<gimli::Piece<EndianSlice<'a, gimli::RunTimeEndian>, usize>>, ()> {
-    let mut evaluation = expression.evaluation(encoding);
+    let mut evaluation = expression.evaluation(encoding); // evaluation for the expression
 
     let mut result = evaluation.evaluate().map_err(|_| ())?;
-    loop {
+    loop { // we iterate through the evaluation states, providing the required data as necessary, until Complete
         match result {
             gimli::EvaluationResult::Complete => break,
             gimli::EvaluationResult::RequiresMemory { address, size, .. } => {
@@ -666,21 +686,28 @@ fn eval_expression<'a>(
             },
             gimli::EvaluationResult::RequiresCallFrameCfa => {
                 result = evaluation.resume_with_call_frame_cfa(cfa.ok_or(())?).map_err(|_| ())?;
-            }
+            },
             gimli::EvaluationResult::RequiresRelocatedAddress(address) => {
                 let new = anti_normal(address);
                 result = evaluation.resume_with_relocated_address(new).map_err(|_| ())?;
+            },
+            gimli::EvaluationResult::RequiresEntryValue(expr) => {
+                let expr_result = eval_expression(&expr, regs, cfa, frame_base, encoding)?;
+                let entry_value = match expr_result[0].location {
+                    gimli::Location::Value { value } => value,
+                    _ => return Err(())
+                };
+                result = evaluation.resume_with_entry_value(entry_value).map_err(|_| ())?;
             }
-            _ => {println!("Unimplemented Evaluation Expression"); return Err(())}
+            _ => {println!("Unimplemented Evaluation Expression: {:?}", result); return Err(())}
         }
     }
-    Ok(evaluation.result())
+    Ok(evaluation.result()) // we return the result
 }
 
-fn slice_to_u64(slice: &[u8]) -> u64 {
-    let bytes: [u8; 8] = slice.try_into().unwrap(); // I know this could panic, but we shouldnt be fetching more than 8 bytes
+fn slice_to_u64(slice: &[u8]) -> u64 { // quick casting of bytes to u64
+    let bytes: [u8; 8] = slice.try_into().unwrap();
     let endian: Endian = ENDIAN.access().unwrap();
-
 
     match endian {
         Endian::Big => u64::from_be_bytes(bytes),
@@ -699,7 +726,7 @@ impl CallStack {
         CallStack(Vec::new())
     }
 
-    pub fn stack_lines(stack: Result<Self, ()>) -> Result<Vec<(usize, String)>, ()> {
+    pub fn stack_lines(stack: Result<Self, ()>) -> Result<Vec<(usize, String)>, ()> { // parses the CallStack into String lines to be displayed by the ui
         if stack.is_err() {
             return Err(());
         }
@@ -709,11 +736,11 @@ impl CallStack {
         let dwarf = dwarf_bind.as_ref().unwrap().dwarf(ENDIAN.access().unwrap());
 
         let mut stack = stack.unwrap().0;
-        stack.reverse();
+        stack.reverse(); // reversing to display the MAIN on the top and as 0: function call
 
-        let mut result = Vec::new();
+        let mut result = Vec::new(); // the final lines
 
-        for (call, function) in stack.iter().enumerate() {
+        for (call, function) in stack.iter().enumerate() { // iterate over function calls
             function.lines(call, &mut result, &dwarf, functions_bind.as_ref().unwrap());
         };
         Ok(result)
@@ -731,7 +758,7 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn lines(&self, call: usize, res: &mut Vec<(usize, String)>, dwarf: &Dwarf, functions: &FunctionIndex) {
+    pub fn lines(&self, call: usize, res: &mut Vec<(usize, String)>, dwarf: &Dwarf, functions: &FunctionIndex) { // lines for a function call
         let parent = match functions.subtype_parent.get(&self.debug_info_offset.unwrap()) {
             Some(parent) => format!("{parent}::"),
             None => "".to_string()
@@ -741,7 +768,7 @@ impl Function {
             None => "".to_string()
         };
 
-        if let Some(parameters) = &self.parameters {
+        if let Some(parameters) = &self.parameters { // if parameters, iterate over parameters
             res.push((0, format!("{call}: {}{}(", parent, self.name)));
             for param in parameters {
                 let mut temp_buf = Vec::new();
@@ -751,13 +778,13 @@ impl Function {
                 res.append(&mut temp_buf);
                 res.last_mut().unwrap().1.push(',');
             }
-            res.last_mut().unwrap().1.pop();
+            res.last_mut().unwrap().1.pop(); // removing the comma from the last param
             res.push((1, format!("){}", return_type,))); // the depth 1 is rendered as depth 0, but gets hidden when the call is collapsed
         } else {
             res.push((0, format!("{call}: {}{}(){}", parent, self.name, return_type,)));
         };
 
-        if let Some(variables) = &self.variables {
+        if let Some(variables) = &self.variables { // if variables, iterate over variables
             for var in variables {
             let mut temp_buf = Vec::new();
             let var_value = var.lines(&mut temp_buf, &dwarf);
@@ -778,7 +805,7 @@ pub struct Variable {
 }
 
 impl Variable {
-    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) -> String {
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: & Dwarf) -> String { // lines for variables, unwinds the type and value
         let vtype = unwind_type(self.vtype, dwarf);
 
         if let Some(location) = self.location.clone() {
@@ -802,18 +829,18 @@ pub struct Parameter {
 }
 
 impl Parameter {
-    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: &Dwarf) -> String {
+    pub fn lines(&self, res: &mut Vec<(usize, String)>, dwarf: &Dwarf) -> String { // lines for parameters , unwinds the type and value
         let vtype = unwind_type(self.vtype, dwarf);
         let value = vtype.value(self.location.clone(), res, 2, dwarf);
         format!("{} {} = {}", vtype.name(dwarf), self.name, value)
     }
 }
 
-pub fn call_stack<'a>() -> Result<CallStack, ()> {
+pub fn call_stack<'a>() -> Result<CallStack, ()> { // unwinds the entire callstack until MAIN function call
     let mut call_stack = CallStack::new();
-
+    // Registers
     let mut registers = REGISTERS.access().unwrap();
-
+    // GLOBAL Bindings
     let ehframe = EHFRAME.access();
     let lines = LINES.access();
     let source = SOURCE.access();
@@ -829,15 +856,15 @@ pub fn call_stack<'a>() -> Result<CallStack, ()> {
     );
 
     loop {
-        if unwind(&mut call_stack, bindings, &mut registers)? {
+        if unwind(&mut call_stack, bindings, &mut registers)? { // unwind a single function call, if true, we are at main, if err, we found an error
             break;
         };
     }
 
-    Ok(call_stack)
+    Ok(call_stack) // if no error, return the unwound call stack
 }
 
-type Bindings<'a> = (
+type Bindings<'a> = ( // just a nicer type struct
     &'a EhFrame<'a>,
     &'a LineAddresses,
     &'a SourceMap,
@@ -845,7 +872,7 @@ type Bindings<'a> = (
     &'a DwarfSections<'a>,
 );
 
-fn unwind (
+fn unwind ( // unwinds a single function call, producing its name, variables, parameters, return type and unwinds the registers to find the previous function call, unless its main
     call_stack: &mut CallStack,
     bindings: Bindings,
     regs: &mut nix::libc::user_regs_struct
@@ -870,18 +897,17 @@ fn unwind (
     let offset = function.to_unit_offset(&dwarf_unit).unwrap();
     let mut entries = dwarf_unit.entries_at_offset(offset).unwrap();
     let _ = entries.next_entry();
-    let die = entries.current().unwrap();
+    let die = entries.current().unwrap(); // we get the function entry, and keep the cursor for params and variables
+    // processing the function info (name, parent, return type)
     let (mut function_info, frame_attribute) = extract_function_info(die, &dwarf, &dwarf_unit);
-
     function_info.debug_info_offset = Some(function);
 
-    let unwind_info = get_unwind_for_address(normal(regs.rip), (&gimli_eh_frame, eh_frame));
+
+    let unwind_info = get_unwind_for_address(normal(regs.rip), (&gimli_eh_frame, eh_frame)); // we get the Unwind info for out address
     let encoding = dwarf_unit.encoding();
-    let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?;
+    let cfa = get_cfa(&unwind_info, regs, &gimli_eh_frame, encoding)?; // we unwind the CFA
 
-
-
-    let frame_base = if frame_attribute.is_some() {
+    let frame_base = if frame_attribute.is_some() { // we unwind the frame base (for variables and functions)
         let expression = frame_attribute.unwrap().exprloc_value().unwrap();
         let frame_base = eval_expression(&expression, regs, Some(cfa), None, encoding)?[0];
         match frame_base.location {
@@ -922,10 +948,10 @@ fn unwind (
     TLDR: might not work, be careful
     */
 
-    //extract_variables(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
+    // we extract variables and parameters
     extract_var(&mut function_info, regs, frame_base, entries, &dwarf, encoding, index.line, &dwarf_unit)?;
 
-    unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?;
+    unwind_registers(&unwind_info, cfa, regs, &gimli_eh_frame, encoding)?; // and finally we unwind the rest of the registers to get the RA and prev RSP
 
 
     if function_info.variables.as_ref().unwrap().len() == 0 { //space opt
@@ -936,8 +962,8 @@ fn unwind (
         function_info.parameters = None
     };
 
-    let main_function = check_for_main(&function_info, eh_frame);
-
+    let main_function = check_for_main(&function_info, eh_frame); // we check if we are in the main function
+    // and return
     call_stack.0.push(function_info);
 
     if main_function {return Ok(true);}
@@ -950,7 +976,7 @@ fn extract_function_info<'a>(
     dwarf: &'a Dwarf, unit: &Unit
 ) -> (Function, Option<gimli::AttributeValue<EndianSlice<'a, Endian>>>) {
 
-    let (name, return_type) = match entry.attr_value(gimli::DW_AT_specification) {
+    let (name, return_type) = match entry.attr_value(gimli::DW_AT_specification) { // if specification, then name and return type are in declaration
         Some(specification) => {
             let declaration_offset = get_unit_entry_offset(debug_reference(specification, unit), dwarf);
             let declaration_entry = dwarf.unit(dwarf.unit_header(declaration_offset.1).unwrap()).unwrap().entry(declaration_offset.0).unwrap();
@@ -962,20 +988,20 @@ fn extract_function_info<'a>(
             (name, return_type)
         },
         None => (
-            string(entry.attr_value(gimli::DW_AT_name).unwrap(), dwarf),
-            match entry.attr_value(gimli::DW_AT_type) {
+            string(entry.attr_value(gimli::DW_AT_name).unwrap_or(gimli::AttributeValue::Udata(0)), dwarf), // name, otherwise ""
+            match entry.attr_value(gimli::DW_AT_type) { // return type
                 Some(attr) => Some(debug_reference(attr, unit)),
                 None => None
             }
         )
     };
 
-    let frame_base = match entry.attr_value(gimli::DW_AT_frame_base) {
+    let frame_base = match entry.attr_value(gimli::DW_AT_frame_base) { // we return the framebse attribute, to parse the expression later
         Some(attr) => Some(attr),
         None => None
     };
 
-    (Function {
+    (Function { // and create the function
         name: String::from(name),
         parameters: Some(Vec::new()),
         variables: Some(Vec::new()),
@@ -985,7 +1011,7 @@ fn extract_function_info<'a>(
 }
 
 #[derive(Debug, Clone)]
-pub enum Location {
+pub enum Location { // a helper struct for variables and parameters value location
     Register(gimli::Register),
     Address(u64)
 }
@@ -1081,7 +1107,7 @@ fn extract_var<'a>(
         } else {
             let param = Parameter {
                 name,
-                location: location.unwrap(),
+                location: location.ok_or(())?,
                 vtype
             };
             parameters.push(param);
@@ -1095,11 +1121,11 @@ fn get_loclist_location(
     frame_base: Option<u64>,
     encoding: gimli::Encoding
 ) -> Result<Location, ()> {
-    while let Some(entry) = loc_list.next().map_err(|_| ())? {
+    while let Some(entry) = loc_list.next().map_err(|_| ())? { // we get the entry, until we find the one, that contains our pc
         if (entry.range.begin..entry.range.end).contains(&normal(regs.rip)) {
             let expression = entry.data;
             let piece = eval_expression(&expression, regs, None, frame_base, encoding)?[0];
-            match piece.location {
+            match piece.location { // we return the value based on the evaluated expression
                 gimli::Location::Value {value} => return Ok(Location::Address(value.to_u64(NOMASK).unwrap()+frame_base.unwrap())),
                 gimli::Location::Address {address} => return Ok(Location::Address(address)),
                 gimli::Location::Register {register} => return Ok(Location::Register(register)),
@@ -1125,8 +1151,10 @@ fn get_next_line(mut rip: u64, lines: &LineAddresses) -> Result<(&SourceIndex, u
     Err(())
 }
 
-// Type unwinding - especially for displaying the types
-enum TypeDisplay<'a> {
+
+// Type unwinding
+
+enum TypeDisplay<'a> { // displaying the implemented types
     Base(BaseType<'a>),
     Pointer(PointerType<'a>),
     Modifier(ModifierType<'a>),
@@ -1138,7 +1166,7 @@ enum TypeDisplay<'a> {
 
 impl <'a> TypeDisplay<'a> {
     fn name(&self, dwarf: &'a Dwarf) -> String {
-        match self {
+        match self { // we get the name for each type, optionally unwinding the contained type
            Self::Base(base) => base.name.unwrap_or("").to_string(),
            Self::Pointer(pointer) => pointer.name(dwarf),
            Self::Modifier(modifier) => format!("{} {}", modifier.name(), unwind_type(modifier.vtype, dwarf).name(dwarf)), // will recurse name
@@ -1150,7 +1178,7 @@ impl <'a> TypeDisplay<'a> {
     }
 
     fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
-        match self {
+        match self { // matching to call the respective value functions
             Self::Base(base) => base.value(location),
             Self::Pointer(pointer) => pointer.value(location),
             Self::Modifier(modifier) => modifier.value(location, res, depth, dwarf),
@@ -1161,7 +1189,7 @@ impl <'a> TypeDisplay<'a> {
         }
     }
 
-    fn const_value(&self, constant: u64) -> String {
+    fn const_value(&self, constant: u64) -> String { // only implemented for some types
         match self {
             Self::Base(base) => {
                 let slice = constant.to_le_bytes();
@@ -1175,7 +1203,7 @@ impl <'a> TypeDisplay<'a> {
     }
 
     fn size(&self, dwarf: &Dwarf) -> BitByteSize {
-        match self {
+        match self { // used for getting the size of the unwound type (in case the upper type uses the size of the lower type)
             Self::Base(base) => base.size,
             Self::Pointer(pointer) => {
                 unwind_type(pointer.vtype, dwarf).size(dwarf)
@@ -1213,7 +1241,7 @@ pub struct BaseType<'a> {
 }
 
 impl <'a>BaseType<'a> {
-    fn constant_value(&self, slice: &[u8], endian: Endian) -> String {
+    fn constant_value(&self, slice: &[u8], endian: Endian) -> String { // we skip loading the bytes from memory
         self.encoding(slice, endian)
     }
 
@@ -1226,7 +1254,7 @@ impl <'a>BaseType<'a> {
         }
     }
 
-    fn encoding(&self, slice: &[u8], endian: Endian) -> String {
+    fn encoding(&self, slice: &[u8], endian: Endian) -> String { // base types contain encoding, which we have interpret to display the value correctly
         let byte_size = slice.len();
         match self.encoding {
             gimli::DW_ATE_unsigned => {
@@ -1322,7 +1350,7 @@ struct ModifierType<'a> {
 impl <'a>ModifierType<'a> {
     fn name(&self) -> String {
         match self.name {
-            Some(name) => name.to_string(),
+            Some(name) => name.to_string(), // either we use the given name, or the generic name
             None => self.modifier.to_string()
         }
     }
@@ -1376,7 +1404,7 @@ impl <'a>ArrayType<'a> {
     }
 
     fn value(&self, location: Location, res: &mut Vec<(usize, String)>, depth: usize, dwarf: &Dwarf) -> String {
-        if self.size.is_none() && self.count.is_none() {
+        if self.size.is_none() && self.count.is_none() { // if empty, we just display as empty array
             if let Some(name) = self.name {
                 return format!("{} []", name);
             } else {
@@ -1394,7 +1422,7 @@ impl <'a>ArrayType<'a> {
             }
         };
 
-        let element_size = match vtype.size(dwarf) {
+        let element_size = match vtype.size(dwarf) { // we get the size of each element
             BitByteSize::Byte(size) => size,
             BitByteSize::Bit(_) => if let Some(name) = self.name {
                 return format!("{} [?]", name);
@@ -1405,7 +1433,7 @@ impl <'a>ArrayType<'a> {
 
         let mut new_buf = Vec::new();
 
-        let count = if self.count.is_some() {
+        let count = if self.count.is_some() { // either we have set count, or we determine it manually
             self.count.unwrap()
         } else {
             let array_size = match self.size.unwrap() {
@@ -1421,7 +1449,7 @@ impl <'a>ArrayType<'a> {
 
         for index in 0..count {
             let mut temp_buf = Vec::new();
-            let element = vtype.value(
+            let element = vtype.value( // we use vtype, giving it progressive address locations
                 Location::Address(address+(index*element_size)),
                 &mut temp_buf,
                 depth+1,
@@ -1433,8 +1461,8 @@ impl <'a>ArrayType<'a> {
         }
 
         res.append(&mut new_buf);
-        if let Some(last) = res.last_mut(){
-            last.1.pop();
+        if let Some(last) = res.last_mut() {
+            last.1.pop(); // popping the last comma
         }
         res.push((depth, "]".to_string()));
         if let Some(name) = self.name {
@@ -1473,7 +1501,7 @@ impl <'a>StructType<'a> {
 
         let mut new_buf = Vec::new();
 
-        for member in &self.members {
+        for member in &self.members { // for each member we unwind the type and find its value
             let mut temp_buf = Vec::new();
             let vtype = unwind_type(member.vtype, dwarf);
             let member_value = vtype.value(
@@ -1529,7 +1557,7 @@ impl <'a>EnumType<'a> {
                 _ => u64::from_bytes(&slice, endian) as u64,
             };
 
-            for member in &self.enumerators {
+            for member in &self.enumerators { // we match the value with the enumerator constant, displaying the name on match
                 let value = member.constant;
                 if value == normal {
                     return format!("{}::{}", self.name, member.name);
@@ -1550,7 +1578,7 @@ struct Enumerator<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub enum BitByteSize {
+pub enum BitByteSize { // currently only byte size works, but bitsize will be read and wont produce an error
     Bit(u64),
     Byte(u64),
 }
@@ -1593,7 +1621,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
         None => None
     };
 
-    match entry.tag() {
+    match entry.tag() { // we match the type, reading its corresponding attributes
         gimli::DW_TAG_base_type => {
             let encoding = encoding(entry.attr_value(gimli::DW_AT_encoding).unwrap());
             let size = match entry.attr_value(gimli::DW_AT_byte_size) {
@@ -1679,7 +1707,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
             };
 
             TypeDisplay::Array(ArrayType {
-                name: name,
+                name,
                 vtype,
                 size,
                 count
@@ -1687,7 +1715,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
         },
         gimli::DW_TAG_structure_type
         | gimli::DW_TAG_union_type
-        | gimli::DW_TAG_class_type => {
+        | gimli::DW_TAG_class_type => { // apart from attributes, we look for members
             let size = match entry.attr_value(gimli::DW_AT_byte_size) {
                 Some(value) => BitByteSize::Byte(value.udata_value().unwrap()),
                 None => BitByteSize::Bit(entry.attr_value(gimli::DW_AT_bit_size).unwrap().udata_value().unwrap())
@@ -1738,7 +1766,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
                 members
             })
         },
-        gimli::DW_TAG_enumeration_type => {
+        gimli::DW_TAG_enumeration_type => { // apart from attributes, we look for enumerators
             let size = match entry.attr_value(gimli::DW_AT_byte_size) {
                 Some(value) => Some(BitByteSize::Byte(number(value))),
                 None => match entry.attr_value(gimli::DW_AT_bit_size) {
@@ -1782,7 +1810,7 @@ fn unwind_type<'a>(debug_info_offset: Type, dwarf: &'a Dwarf) -> TypeDisplay<'a>
                 });
             };
             TypeDisplay::Enum(EnumType {
-                name: name.unwrap(),
+                name: name.unwrap_or("?"),
                 vtype,
                 size,
                 enumerators
@@ -1822,7 +1850,7 @@ fn location_memory(location: Location, size: BitByteSize, endian: Endian) -> Res
         BitByteSize::Byte(byte) => byte,
         BitByteSize::Bit(bit) => bit.div_ceil(8)
     };
-    let res = match location {
+    let res = match location { // we either read from memory or the register
         Location::Register(register) => {
             let mut bind = REGISTERS.access();
             let number = match_register(&register, bind.as_mut().unwrap());
@@ -1858,7 +1886,7 @@ pub struct Assembly {
 }
 
 impl Assembly {
-    pub fn create(rip: u64) -> Result<(Self, usize), ()> {
+    pub fn create(rip: u64) -> Result<(Self, usize), ()> { // creating the code disassembly at the radius aroud the our RIP
         let range = match trace::get_map_range(rip) {
             Some(range) => range,
             None => return Err(())
@@ -1869,15 +1897,15 @@ impl Assembly {
 
         let bytes = trace::read_memory(base, size as usize)?;
 
-        let (pointer, line) = align_pointer(base, rip, &bytes)?;
+        let (pointer, line) = align_pointer(base, rip, &bytes)?; // we align the pointer to real instructions
 
-        let assembly = disassemble_code(pointer, &bytes[(pointer - base) as usize..])?;
+        let assembly = disassemble_code(pointer, &bytes[(pointer - base) as usize..])?; // and we produce the formatted disassembly
         Ok((assembly, line))
     }
 }
 
 pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize), ()> { // the second one is the line number
-    for offset in 0..DEPTH {
+    for offset in 0..DEPTH { // we iterate until we get instruction corresponding to our pc, and skipping the illegal ones
         let mut decoder = Decoder::with_ip(64, &bytes[offset as usize..], address+offset, DecoderOptions::NONE);
         let mut instruction = Instruction::default();
         let mut counter = 0;
@@ -1895,7 +1923,7 @@ pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize
     Err(()) // WOW HOW
 }
 
-pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> {
+pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> { // from the aligned pointer, we parse the instructions and create the formatted instructions
     let mut decoder = Decoder::with_ip(64, bytes, address, DecoderOptions::NONE);
     let mut formatter = NasmFormatter::new();
 
@@ -1940,14 +1968,14 @@ pub fn disassemble_code(address: u64, bytes: &[u8]) -> Result<Assembly, ()> {
 
 // HELPER FUNCTIONS
 
-pub fn normal(rip: u64) -> u64 {
+pub fn normal(rip: u64) -> u64 { // subtracts the EXEC SHIFT to produce the normalize PC value
     match EXEC_SHIFT.access().as_ref() {
         Some(offset) => rip - offset,
         None => rip
     }
 }
 
-pub fn anti_normal(address: u64) -> u64 {
+pub fn anti_normal(address: u64) -> u64 { // adds the EXEC SHIFT to produce the real address
     match EXEC_SHIFT.access().as_ref() {
         Some(offset) => address + offset,
         None => address
@@ -1955,6 +1983,7 @@ pub fn anti_normal(address: u64) -> u64 {
 }
 
 fn get_unit_entry_offset(offset: DebugInfoOffset, dwarf: &Dwarf) -> (gimli::UnitOffset, DebugInfoOffset) { // unit offset AND the offset of the Unit
+    // UnitEntryOffset from DebugInfoOffset
     let mut units = dwarf.units();
     while let Some(unit) = units.next().unwrap() {
         match offset.to_unit_offset(&unit) {
@@ -2005,7 +2034,7 @@ fn debug_reference(attr: gimli::AttributeValue<EndianSlice<'_, Endian>>, unit: &
 
 // Creating numbers from bytes
 
-trait FromBytes<const N: usize> {
+trait FromBytes<const N: usize> { // trait because of BuiltIn Type
     fn from_bytes(bytes: &[u8], endian: Endian) -> Self;
     fn fixed(bytes: &[u8], endian: Endian) -> [u8; N];
 }
@@ -2014,22 +2043,22 @@ macro_rules! impl_from_bytes {
     ($($t:ty), *) => {
         $(
             impl FromBytes<{std::mem::size_of::<$t>()}> for $t {
-                fn from_bytes(bytes: &[u8], endian: Endian) -> Self {
+                fn from_bytes(bytes: &[u8], endian: Endian) -> Self { // switching between LE and BE
                     match endian {
                         Endian::Little => <$t>::from_le_bytes(Self::fixed(bytes, endian)),
                         Endian::Big => <$t>::from_be_bytes(Self::fixed(bytes, endian))
                     }
                 }
-                fn fixed(bytes: &[u8], endian: Endian) -> [u8; {std::mem::size_of::<$t>()}] {
-                    let size = {std::mem::size_of::<$t>()} - bytes.len();
+                fn fixed(bytes: &[u8], endian: Endian) -> [u8; {std::mem::size_of::<$t>()}] { // produces the correct sized array from the byte slice
+                    let size = {std::mem::size_of::<$t>()} - bytes.len(); // dynamically getting the const size of the type we are implementing this for
                     let mut add = vec![0;size];
                     match endian {
-                        Endian::Big => {
+                        Endian::Big => { // we append the correct bytes to the empty bytes
                             let mut vec = Vec::from(bytes);
                             add.append(&mut vec);
                             add.try_into().unwrap()
                         }
-                        Endian::Little => {
+                        Endian::Little => { // we append the empty bytes to the correct bytes
                             let mut vec = Vec::from(bytes);
                             vec.append(&mut add);
                             vec.try_into().unwrap()
@@ -2041,4 +2070,4 @@ macro_rules! impl_from_bytes {
     };
 }
 
-impl_from_bytes!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+impl_from_bytes!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64); // macro implemented for all of these values

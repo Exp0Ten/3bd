@@ -76,11 +76,11 @@ impl ImplBreakpoints for Breakpoints {
         Ok(())
     }
 
-    fn enable_all(&mut self) -> Result<(), ()> {
+    fn enable_all(&mut self) -> Result<(), ()> { // we insert all of the breakpoints in the programs memory, and save the replaced bytes
         let copy = self.clone();
         let keys = copy.keys();
         for key in keys {
-            let byte = insert_breakpoint(PID.access().unwrap(), anti_normal(*key));
+            let byte = insert_breakpoint(PID.access().unwrap(), anti_normal(*key)); // antinormal, because we are only saving the normalized values in the BREAKPOINTS addresses
             match byte {
                 Ok(byte) => *self.get_mut(key).unwrap() = byte,
                 Err(()) => {self.remove(key);}
@@ -102,7 +102,7 @@ pub struct MapBits {
 #[derive(Debug)]
 pub struct MemoryMap {
     pub name: String,
-    pub range: std::ops::Range<u64>,
+    pub range: std::ops::Range<u64>, // memory address range
     _permissions: MapBits,         // rwxp (read, write, execute, private)
     pub offset: u64,               // into file
 }
@@ -129,7 +129,7 @@ pub enum Operation {
 
 // Tasks definition (to perform async)
 
-fn task_wait() -> iced::Task<window::Message> {
+fn task_wait() -> iced::Task<window::Message> { // task_wait creates an async thread to wait for the tracee to stop (by signal, breakpoint or user)
     iced::Task::perform(wait_async(PID.access().unwrap()), |result| window::Message::Operation(Operation::HandleSignal(result)))
 }
 
@@ -174,35 +174,35 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         Operation::LoadFile => {
             let reset = FILE.access().is_some();
 
-            let file = match Dialog::file(None, None) {
+            let file = match Dialog::file(None, None) { // user file selection
                 Some(file) => file,
                 None => return
             };
-            if reset {
+            if reset { // if a different file was selected, then we clear the Globals
                 if reset_file(state).is_err() {
                     return;
                 };
             }
 
-            match object::test_file(&file) {
+            match object::test_file(&file) { // we test the file, if its an executable
                 Ok(_) => (),
                 Err(()) => return
             };
 
-            let data = object::read_file(&file);
+            let data = object::read_file(&file); // we read the file contents and set the data to the GLOBAL
             unsafe {
                 DATA = data
             }
-            FILE.sets(file.clone());
+            FILE.sets(file.clone()); // setting the path to the new file
 
-            let no_debug = dwarf_set(state).is_err(); // preloading all dwarf related data
+            let no_debug = dwarf_set(state).is_err(); // preloading all dwarf related data, err when no debug information
             state.internal.no_debug = no_debug;
             if no_debug {
                 Dialog::warning(&format!("This file ({}) does not contain debbuging data.", file.file_name().unwrap().to_str().unwrap()), None);
                 BREAKPOINTS.sets(Breakpoints::new());
                 return;
             }
-            panes_preload(state, task);
+            panes_preload(state, task); // preloading the panes (code widgets with the main file of the binary)
         },
 
         Operation::RunTracee => {
@@ -213,11 +213,11 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
             let pid = match object::run_tracee(FILE.access().as_ref().unwrap(), Vec::new(), Some(stdio)) {
                 Err(_) => return,
-                Ok(pid) => {PID.sets(Pid::from_raw(pid)); Pid::from_raw(pid)},
+                Ok(pid) => {PID.sets(Pid::from_raw(pid)); Pid::from_raw(pid)}, // we save the tracee pid to the global
             };
-            tracee_setup(state, pid, task);
+            tracee_setup(state, pid, task); // we setup the tracee data
 
-            *task = Some(task_read());
+            *task = Some(task_read()); // we launch the reading from the PTY
         },
         Operation::StopTracee => {
             if PID.access().is_none() {
@@ -228,7 +228,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
                 Err(()) => return
             };
 
-            *task = Some(task_reset());
+            *task = Some(task_reset()); // we reset the Trace data and globals
         },
 
         Operation::Step => {
@@ -238,59 +238,56 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         },
         Operation::SourceStep => {
             let pid = PID.access().unwrap();
-            if step(pid, None).is_err() {return;};
+            if step(pid, None).is_err() {return;}; // we step away from the last line
             let _ = wait(pid);
-            let mut breakpoints = Breakpoints::new();
+            let mut breakpoints = Breakpoints::new(); // we create temporary breakpoints, where all addresses in the LINES get a breakpoint
             let bind = LINES.access();
-            for (address, source) in bind.as_ref().unwrap().iter() { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
-                if source.hash_path != *state.internal.pane.comp_dir.as_ref().unwrap() {
-                    //continue;
-                }
+            for (address, _) in bind.as_ref().unwrap().iter() { //we breakpoint every line for a single wait call, whatever the program stops at, we disable them again
                 let byte = insert_breakpoint(pid, anti_normal(*address)).unwrap();
                 breakpoints.add(*address, byte);
             }
-            if restart_tracee(pid, None).is_err() {
+            if restart_tracee(pid, None).is_err() { // we try continuing the program
                 breakpoints.disable_all().unwrap();
                 return;
             };
-            state.internal.source_step = Some(breakpoints);
+            state.internal.source_step = Some(breakpoints); // we save the breakpoints
             state.internal.stopped = false;
-            state_cont(state);
-            *task = Some(task_wait())
+            state_cont(state); // we set the state to running
+            *task = Some(task_wait()) // and wait for the next stop
         },
         Operation::Pause => {
-            if send_signal(PID.access().unwrap(), Signal::SIGTRAP).is_err() {
+            if send_signal(PID.access().unwrap(), Signal::SIGTRAP).is_err() { // we manually stop the program (as if it hit a breakpoint)
                 return;
             };
-            state.internal.manual = true;
+            state.internal.manual = true; // we set the manual so we know the program stopped because of us
         },
         Operation::Continue => {
             let pid = PID.access().unwrap();
-            if step(pid, None).is_err() {return;};
+            if step(pid, None).is_err() {return;}; // we step away from the current line (as to not hit the same breakpoint again)
             let _ = wait(pid);
-            if BREAKPOINTS.access().as_mut().unwrap().enable_all().is_err() {
-                *task = Some(task_reset());
+            if BREAKPOINTS.access().as_mut().unwrap().enable_all().is_err() { // we enable all of the breakpoints
+                *task = Some(task_reset()); // if that fails we reset the file
                 return;
             };
-            if restart_tracee(pid, state.last_signal).is_err() {
+            if restart_tracee(pid, state.last_signal).is_err() { // and we continue the tracee
                 if BREAKPOINTS.access().as_mut().unwrap().disable_all().is_err() {
                     *task = Some(task_reset())
                 };
                 return;
             };
 
-            *task = Some(task_wait());
+            *task = Some(task_wait()); // we wait for the next stop
 
             state_cont(state);
             state.internal.stopped = false;
-            state.internal.manual = false;
+            state.internal.manual = false; // and manual gets reset
         },
         Operation::Kill => {
             if state.internal.stopped {
                 state.last_signal = Some(Signal::SIGKILL);
                 return;
             }
-            if send_signal(PID.access().unwrap(), Signal::SIGKILL).is_err() {
+            if send_signal(PID.access().unwrap(), Signal::SIGKILL).is_err() { // if not stopped, we just send the signal right away
                 return;
             };
         },
@@ -301,7 +298,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             }
 
             let pid = PID.access().unwrap();
-            if send_signal(pid, Signal::SIGSTOP).is_err() {
+            if send_signal(pid, Signal::SIGSTOP).is_err() { // if not stopped, we stop the tracee
                 return;
             };
             let _ = wait(pid);
@@ -316,9 +313,9 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
         Operation::HandleSignal(Err(err)) => *task = match Dialog::warning_choice(&format!("Encountered an error while waiting for the tracee program: {}\nDo you wish to try again? (selecting no will kill the tracee)", err), Some("Trace Error")) {
             rfd::MessageDialogResult::Yes => Some(iced::Task::perform(wait_async(PID.access().unwrap()), |result| window::Message::Operation(Operation::HandleSignal(result)))),
             _ => Some(iced::Task::done(window::Message::Operation(Operation::StopTracee)))
-        },
+        }, // if we encounter an error while waiting for the tracee to stop, we give the user an option to try again
 
-        Operation::Reset => {
+        Operation::Reset => { // tracee state reset
             state.internal.stopped = false;
             state.internal.source_step = None;
             state.internal.manual = false;
@@ -329,25 +326,25 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
             state.last_signal = None;
             reset();
         },
-        Operation::_ResetFile => {let _ = reset_file(state);},
+        Operation::_ResetFile => {let _ = reset_file(state);}, // complete file 
 
         Operation::Read(result) => {
             if result.is_err() {
                 return;
             }
 
-            *task = Some(task_read());
+            *task = Some(task_read()); // we launch a new read, creating an async loop
 
             let data = result.unwrap();
             if data.1 == 0 {
                 return;
             }
 
-            let mut text: String = data.0[..data.1].iter().map(|byte| *byte as char).collect();
+            let mut text: String = data.0[..data.1].iter().map(|byte| *byte as char).collect(); // we create the string from the bytes
 
             ui::process_string(&mut text);
 
-            state.internal.pane.output.push_str(&text);
+            state.internal.pane.output.push_str(&text); // pushing it into the output
         },
         Operation::Stack(result) => {
             match result {
@@ -360,7 +357,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
             let mut tasks = Vec::new();
 
-            for (id, pane) in state.layout.panes.iter() {
+            for (id, pane) in state.layout.panes.iter() { // updating all of the active stack panes
                 match pane {
                     ui::Pane::Stack(..) => tasks.push(task_stack_update(*id)),
                     _ => ()
@@ -376,7 +373,7 @@ pub fn operation_message(state: &mut window::State, operation: Operation, task: 
 
 fn dwarf_set(state: &mut window::State) -> Result<(), ()> {
     #[allow(static_mut_refs)]
-    let data = unsafe {
+    let data = unsafe { // static reference
         &DATA
     };
 
@@ -391,7 +388,7 @@ fn dwarf_set(state: &mut window::State) -> Result<(), ()> {
     };
 
     match &object {
-        object_foreign::File::Elf64(elf) => {
+        object_foreign::File::Elf64(elf) => { // we check for static executable
             if elf.elf_header().e_type.get(object.endianness()) == 2 {
                 state.internal.static_exec = true;
             }
@@ -418,7 +415,7 @@ fn panes_preload(state: &mut window::State, task: &mut Option<iced::Task<window:
     state.internal.pane.comp_dir = Some(PathBuf::from(comp_dir.clone()));
     let mut tasks = Vec::new();
 
-    for (id, pane) in panes.iter_mut() {
+    for (id, pane) in panes.iter_mut() { // for every active code pane, select the main file of the program
         match pane {
             ui::Pane::Code(inner) => {
                 inner.dir = Some(comp_dir.clone());
@@ -427,7 +424,7 @@ fn panes_preload(state: &mut window::State, task: &mut Option<iced::Task<window:
             _ => ()
         }
     }
-    *task = Some(iced::Task::batch(tasks));
+    *task = Some(iced::Task::batch(tasks)); // batch allowing for multiple code panes
 }
 
 fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Task<window::Message>>) {
@@ -438,7 +435,7 @@ fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Tas
 
     let maps = get_process_maps(&proc_path).unwrap();
 
-    for map in &maps {
+    for map in &maps { // we find our exec shift, unless its a static executable
         if map.name != path.to_str().unwrap() {
             continue;
         }
@@ -458,7 +455,7 @@ fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Tas
 
     let panes = &mut state.layout.panes;
 
-    for (_id, pane) in panes.iter_mut() {
+    for (_id, pane) in panes.iter_mut() { // for every active memory pane we set the address to the antinormal
         match pane {
             ui::Pane::Memory(inner) => {
                 inner.address = anti_normal(0);
@@ -469,13 +466,13 @@ fn tracee_setup(state: &mut window::State, pid: Pid, task: &mut Option<iced::Tas
         }
     };
 
-    if ui::check_for_assembly(state) {
+    if ui::check_for_assembly(state) { // and we update every active assembly pane
         *task = assembly_update(state, REGISTERS.access().unwrap().rip);
     }
 }
 
 
-fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option<iced::Task<window::Message>>) {
+fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option<iced::Task<window::Message>>) { // handling signals
     state.status = Some(status);
     match status {
         wait::WaitStatus::Exited(pid, exit) => {
@@ -489,7 +486,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
                 *task = Some(task_reset());
                 return;
             }
-            if !state.internal.manual {
+            if !state.internal.manual { // if manual, we dont want to display the signal
                 state.last_signal = Some(signal)
             }
         },
@@ -502,7 +499,7 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         Ok(info) => info,
         Err(_) => return
     };
-    match info.si_code {
+    match info.si_code { // if breakpoint, we remove the last signal
         TRAP_BRKPT|SI_KERNEL => {
             state.internal.breakpoint = true;
             state.last_signal = None
@@ -510,35 +507,35 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
         _ => state.internal.breakpoint = false
     };
 
-    let mut regs = match get_registers(pid) {
+    let mut regs = match get_registers(pid) { // new regs
         Ok(regs) => regs,
         Err(_) => return
     };
-    if state.internal.breakpoint {
+    if state.internal.breakpoint { // if breakpoint we have to move a byte back (because we stopped a byte further)
         regs.rip = regs.rip -1;
         let _ = set_registers(PID.access().unwrap(), regs);
     }
     REGISTERS.sets(regs);
 
-    MAPS.sets(get_process_maps(PROC_PATH.access().as_ref().unwrap()).unwrap());
+    MAPS.sets(get_process_maps(PROC_PATH.access().as_ref().unwrap()).unwrap()); // new maps
 
-    let _ = match &state.internal.source_step {
+    let _ = match &state.internal.source_step { // if sourcestep was active, we want to disable all of the temporary
         Some(breakpoints) => {
             let res = breakpoints.disable_all();
             state.internal.source_step = None;
             res
         },
-        None => if !state.internal.stopped {BREAKPOINTS.access().as_mut().unwrap().disable_all()} else {Ok(())}
+        None => if !state.internal.stopped {BREAKPOINTS.access().as_mut().unwrap().disable_all()} else {Ok(())} // otherwise disable the normal breakpoints, but only if we ever ran the program (not stepping)
     };
     state.internal.stopped = true;
 
     let mut tasks = Vec::new();
 
     if ui::check_for_assembly(state) { // performance reasons
-        tasks.push(task_assembly(regs.rip));
+        tasks.push(task_assembly(regs.rip)); // updating assembly
     };
 
-    if state.internal.no_debug {
+    if state.internal.no_debug { // if no debug, end here
         *task = Some(iced::Task::batch(tasks));
         return;
     }
@@ -548,33 +545,33 @@ fn handle(state: &mut window::State, status: wait::WaitStatus, task: &mut Option
     state.internal.pane.file = file.map(|index| index.clone());
     drop(bind);
 
-    if ui::check_for_code(state) {
-        if let Some((scroll, load)) = ui::code_panes_update(state) {
+    if ui::check_for_code(state) { // if any active code panes
+        if let Some((scroll, load)) = ui::code_panes_update(state) { // if there are any updates
             let index = state.internal.pane.file.as_ref().unwrap();
             let bind = SOURCE.access();
             let source = bind.as_ref().unwrap().index_with_line(index);
             let mut file = index.hash_path.clone();
             file.push(source.path.clone());
 
-            if source.content.is_none() {
+            if source.content.is_none() { // if content is empty, we load it
                 tasks.push(task_content(file, index.clone(), None).chain(load.chain(scroll)));
             } else {
-                tasks.push(load.chain(scroll));
+                tasks.push(load.chain(scroll)); // otherwise just scroll the code panes
             }
         };
     }
 
-    match &state.internal.pane.file {
+    match &state.internal.pane.file { // if we are stopped at a line, create the callstack
         Some(_) => {
             tasks.push(task_stack());
         },
         None => ()
     }
 
-    *task = Some(iced::Task::batch(tasks));
+    *task = Some(iced::Task::batch(tasks)); // return all of the tasks
 }
 
-fn reset() {
+fn reset() { // reset TRACE globals
     STDIO.none();
     PID.none();
     PROC_PATH.none();
@@ -584,7 +581,7 @@ fn reset() {
     MAPS.none();
 }
 
-fn reset_file(state: &mut window::State) -> Result<(), ()> {
+fn reset_file(state: &mut window::State) -> Result<(), ()> { // reset selected file and GLOBALS
     if PID.access().is_some() {
         match Dialog::warning_choice("The program is still running. Are you sure you want to stop the process and discard of the file?", None) {
             rfd::MessageDialogResult::No => return Err(()),
@@ -609,13 +606,13 @@ fn reset_file(state: &mut window::State) -> Result<(), ()> {
     Ok(())
 }
 
-fn state_cont(state: &mut window::State) {
+fn state_cont(state: &mut window::State) { // set state to continue
     state.last_signal = None;
     state.internal.breakpoint = false;
     state.internal.pane.file = None;
 }
 
-fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<window::Message>> {
+fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<window::Message>> { // while setup, we load the assembly and scroll to the rip address
     let mut task = None;
     let range = match get_map_range(rip) {
         Some(range) => range,
@@ -650,7 +647,7 @@ fn assembly_update(state: &mut window::State, rip: u64) -> Option<iced::Task<win
 
 // Tracing Interface
 
-pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> {
+pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> { // opens the memory file from the proc_fs, (creating the access to the tracees memory)
     let mut path = proc_path.clone();
     path.push("mem");
     match File::open(path) {
@@ -659,11 +656,11 @@ pub fn open_memory(proc_path: &PathBuf) -> Result<File, ()> {
     }
 }
 
-fn close_memory() {
+fn close_memory() { // closes the file by dropping the FD and reference
     *MEMORY.access() = None;
 }
 
-pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
+pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> { // opens and reads the process memory maps
     let mut path = proc_path.clone();
     path.push("maps");
     let mut file = match File::open(path) {
@@ -681,9 +678,9 @@ pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
     let lines: Vec<&str> = content.split("\n").collect();
     let mut mmap_vector = Vec::with_capacity(lines.len());
 
-    for line in lines {
+    for line in lines { // parsing the map entries
         mmap_vector.push({
-            if line == "" {continue;}
+            if line == "" {continue;} // skipping empty lines
 
             let mut split = line.split_ascii_whitespace();
 
@@ -720,7 +717,7 @@ pub fn get_process_maps(proc_path: &PathBuf) -> Result<Vec<MemoryMap>, ()> {
     Ok(mmap_vector)
 }
 
-pub fn get_map_range(address: u64) -> Option<std::ops::Range<u64>> {
+pub fn get_map_range(address: u64) -> Option<std::ops::Range<u64>> { // we iterate through the maps, returning the coresponding map, if we find any
     let bind = MAPS.access();
     let maps = bind.as_ref().unwrap();
     for map in maps {
@@ -731,7 +728,7 @@ pub fn get_map_range(address: u64) -> Option<std::ops::Range<u64>> {
     None
 }
 
-pub fn get_tracee_path(proc_path: &PathBuf) -> Result<PathBuf, ()> {
+pub fn get_tracee_path(proc_path: &PathBuf) -> Result<PathBuf, ()> { // we reload the path as the full and real path to the file (from proc_fs)
     let mut path = proc_path.clone();
     path.push("exe");
     match std::fs::read_link(path) {
@@ -741,7 +738,7 @@ pub fn get_tracee_path(proc_path: &PathBuf) -> Result<PathBuf, ()> {
 }
 
 
-pub fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> {
+pub fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> { // we first save the byte, then replace the it with the 0XCC byte (producing a SIGTRAP and breakpoint)
     let save = match ptrace::read(pid, address as *mut c_void) {
         Ok(long) => long as u64,
         Err(err) => {Dialog::error(&format!("Could not insert breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
@@ -753,7 +750,7 @@ pub fn insert_breakpoint(pid: Pid, address: u64) -> Result<u8, ()> {
     }
 }
 
-pub fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
+pub fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> { // we insert back the saved byte (removing the breakpoint)
     let save = match ptrace::read(pid, address as *mut c_void) {
         Ok(long) => long as u64,
         Err(err) => {Dialog::error(&format!("Could not remove breakpoint at {}: {}", address, err), Some("Trace error")); return Err(());}
@@ -765,42 +762,42 @@ pub fn remove_breakpoint(pid: Pid, address: u64, byte: u8) -> Result<(), ()> {
     }
 }
 
-pub fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> {
+pub fn get_registers(pid: Pid) -> Result<user_regs_struct, ()> { // wrapper for PTRACE_GETREGS
     match ptrace::getregs(pid) {
         Ok(regs) => Ok(regs),
         Err(err) => {Dialog::error(&format!("Could not get register values: {}", err), Some("Trace error")); Err(())}
     }
 }
 
-fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> {
+fn set_registers(pid: Pid, regs: user_regs_struct) -> Result<(), ()> { // wrapper for PTRACE_SETREGS
     match ptrace::setregs(pid, regs) {
         Ok(()) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not set register values: {}", err), Some("Trace error")); Err(())}
     }
 }
 
-fn kill_tracee(pid: Pid) -> Result<(), ()> {
+fn kill_tracee(pid: Pid) -> Result<(), ()> { // wrapper for PTRACE_KILL
     close_memory();
     match ptrace::kill(pid) {
         Ok(()) => (),
         Err(err) => {Dialog::error(&format!("Could not stop the tracee: {}", err), Some("Trace error")); return Err(());}
     };
-    let _ = object::close_child_stdio();
+    let _ = object::close_child_stdio(); // closing the child stdio
     Ok(())
 }
 
-fn restart_tracee(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { //also used for signaling the tracee
+fn restart_tracee(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { // wrapper for PTRACE_CONT, also used for signaling the tracee,
     match ptrace::cont(pid, signal) {
         Ok(()) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not deliver the signal to the tracee: {}", err), Some("Trace error")); Err(())}
     }
 }
 
-fn signal_tracee(pid: Pid, signal: Signal) -> Result<(), ()> { //WRAPPER
+fn signal_tracee(pid: Pid, signal: Signal) -> Result<(), ()> { // wrapper for PTRACE_CONT with a signal
     restart_tracee(pid, Some(signal))
 }
 
-pub fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
+pub fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> { // wrapper for PTRACE_STEP
     match ptrace::step(pid, signal) {
         Ok(()) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not step the tracee program: {}", err), Some("Trace error")); Err(())}
@@ -808,14 +805,14 @@ pub fn step(pid: Pid, signal: Option<Signal>) -> Result<(), ()> {
 }
 
 
-fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> {
+fn seek_memory(address: u64, memory_file: &mut File) -> Result<(), ()> { // seeking into the memory file
     match memory_file.seek(std::io::SeekFrom::Start(address)) {
         Ok(_) => Ok(()),
         Err(err) => {Dialog::error(&format!("Could not seek into the memory file: {}", err), Some("Memory error")); Err(())}
     }
 }
 
-pub fn test_memory(address: u64) -> Result<(), bool> { // if Err(true) -> start, if Err(false) -> End, if Ok() then we are in valid memory space
+pub fn test_memory(address: u64) -> Result<(), bool> { // tests if the address is in valid memory space // if Err(true) -> start, if Err(false) -> End, if Ok() then we are in valid memory space
     match get_map_range(address) {
         Some(_) => (),
         None => return Err(true)
@@ -827,7 +824,7 @@ pub fn test_memory(address: u64) -> Result<(), bool> { // if Err(true) -> start,
     Ok(())
 }
 
-pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
+pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> { // reads from the memory file
     let mut bind = MEMORY.access();
     let mut memory = bind.as_mut().unwrap();
     let mut buf: Vec<u8> = vec![0; amount];
@@ -843,26 +840,26 @@ pub fn read_memory(address: u64, amount: usize) -> Result<Vec<u8>, ()> {
 }
 
 
-pub fn wait(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> {
+pub fn wait(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> { // waits for the next signal
     wait::waitpid(pid, None)
 }
 
-pub async fn wait_async(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> { // async wrapper
+pub async fn wait_async(pid: Pid) -> Result<wait::WaitStatus, nix::errno::Errno> { // async wrapper for wait
     wait(pid)
 }
 
 
-fn get_sig_info(pid: Pid) -> Result<nix::libc::siginfo_t, ()> {
+fn get_sig_info(pid: Pid) -> Result<nix::libc::siginfo_t, ()> { // wrapper for PTRACE_GETSIGINFO
     match ptrace::getsiginfo(pid) {
         Ok(info) => Ok(info),
         Err(err) => {Dialog::error(&format!("Could not get signal info of the tracee program: {}", err), Some("Trace error")); Err(())}
     }
 }
 
-fn send_signal(pid: Pid, signal: Signal) -> Result<(), ()> {
+fn send_signal(pid: Pid, signal: Signal) -> Result<(), ()> { // wrapper for kill(pid, signal)
     signal::kill(pid, signal).map_err(|_| ())
 }
 
-fn test_pid(pid: Pid) -> bool {
+fn test_pid(pid: Pid) -> bool { // testing if the program with PID is still alive
     signal::kill(pid, None).is_ok()
 }
