@@ -25,13 +25,13 @@ pub struct Asset;
 
 // Global Data Handle
 
-pub static mut DATA: Vec<u8> = Vec::new(); // The executable file contents
+pub static mut DATA: Vec<u8> = Vec::new(); // The executable file contents //AI
 // we use an unsafe method of storing the file data in order to produce references of 'static lifetime
 // this is important for storing the other global variables
 
 // this is a safe and controlled method, using Mutex (which prevents from multiple references to exist at once and therefore data racing between threads)
 // Option<T> lets us define the globals as empty on startup
-type Global<T> = Mutex<Option<T>>;
+type Global<T> = Mutex<Option<T>>; //AI
 
 pub static CONFIG: Global<config::Config> = empty();
 pub static FILE: Global<std::path::PathBuf> = empty();
@@ -71,7 +71,7 @@ pub trait ImplGlobal<T> { // trait because you cant implement external types, an
 
 impl <T>ImplGlobal<T> for Global<T> {
     // accesing the Global
-    fn access(&self) -> MutexGuard<'_, Option<T>> {
+    fn access(&self) -> MutexGuard<'_, Option<T>> { //AI
         self.lock().unwrap()
     }
     // overwriting the Global

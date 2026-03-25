@@ -1904,7 +1904,7 @@ impl Assembly {
     }
 }
 
-pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize), ()> { // the second one is the line number
+pub fn align_pointer(address: u64, rip: u64, bytes: &[u8]) -> Result<(u64, usize), ()> { //AI // the second number is the line number of the current instruction
     for offset in 0..DEPTH { // we iterate until we get instruction corresponding to our pc, and skipping the illegal ones
         let mut decoder = Decoder::with_ip(64, &bytes[offset as usize..], address+offset, DecoderOptions::NONE);
         let mut instruction = Instruction::default();
@@ -2039,7 +2039,7 @@ trait FromBytes<const N: usize> { // trait because of BuiltIn Type
     fn fixed(bytes: &[u8], endian: Endian) -> [u8; N];
 }
 
-macro_rules! impl_from_bytes {
+macro_rules! impl_from_bytes { //AI
     ($($t:ty), *) => {
         $(
             impl FromBytes<{std::mem::size_of::<$t>()}> for $t {

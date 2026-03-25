@@ -32,7 +32,7 @@ use crate::{
 
 pub fn run_tracee(file: &Path, args: Vec<String>, slave: Option<std::os::fd::OwnedFd>) -> Result<i32, ()> {
     let stdio= match slave { // creating Stdio from the internal terminal or the external ones
-        Some(slave) =>  (
+        Some(slave) =>  ( //AI
             Stdio::from(slave.try_clone().map_err(|_| ())?),
             Stdio::from(slave.try_clone().map_err(|_| ())?),
             Stdio::from(slave),
@@ -88,7 +88,7 @@ pub fn test_file(file: &Path) -> Result<(), ()> { // for testing if we have a co
 }
 
 pub fn open_child_stdio() -> Result<std::os::fd::OwnedFd, ()> { // retuns the FD of the slave, and sets the Global with the master FD
-    let pty = match pty::openpty(None, None) {
+    let pty = match pty::openpty(None, None) { //AI
         Ok(pty) => pty,
         Err(_) => {Dialog::error("Could not open child stdio.", Some("Trace Error")); return Err(());},
     };
