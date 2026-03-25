@@ -24,3 +24,9 @@ gcc & g++ - for compiling the example codes (c and c++ respectively)
 sudo apt install gcc
 sudo apt install g++
 ```
+
+Lastly, this project uses the glibc:
+```sh
+sudo apt install libc6
+```
+(libc6 is the current version of the glibc, and should also be the dependency of mentioned compilers)
