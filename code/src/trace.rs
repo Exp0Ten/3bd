@@ -585,7 +585,10 @@ fn reset_file(state: &mut window::State) -> Result<(), ()> { // reset selected f
     if PID.access().is_some() {
         match Dialog::warning_choice("The program is still running. Are you sure you want to stop the process and discard of the file?", None) {
             rfd::MessageDialogResult::No => return Err(()),
-            _ => ()
+            _ => match kill_tracee(PID.access().unwrap()) {
+                Ok(_) => (),
+                Err(()) => return Err(())
+            }
         }
         reset();
     }

@@ -77,7 +77,7 @@ Mimo hlavní knihovny jsem dále použil:
 
 ## Ikony Adwaita
 
-V práci také používám soubor ikon *Adwaita* [_] vytvořený pod projektem *GNOME*. Ve složce "code/src/assets/icons" se s použitými ikonami nachází soubory "LICENSE" a "README.md", které upřesňují licencování této grafiky. Všechny ikony, vyjma souboru "TBD.svg", licencuji pod licencí "GNU Lesser General Public License v3.0". Ta je kompatibilní s tou, která licencuje celý můj projekt ("GNU General Public License v3.0").
+V práci také používám soubor ikon *Adwaita* [_] vytvořený pod projektem *GNOME*. Ve složce "code/assets/icons" se s použitými ikonami nachází soubory "LICENSE" a "README.md", které upřesňují licencování této grafiky. Všechny ikony, vyjma souboru "TBD.svg", licencuji pod licencí "GNU Lesser General Public License v3.0". Ta je kompatibilní s tou, která licencuje celý můj projekt ("GNU General Public License v3.0").
 
 # Zhodnocení dosažených výsledků
 
@@ -113,24 +113,59 @@ Popis instalace těchto závislostí pro distribuce Debian a Ubuntu se nachází
 
 ## Popis uživatelského rozhraní
 
+Celé uživatelské rozhraní se skládá ze tří částí. Tou nejdůležitější je hlavní okno, přes ktére se program ovládá, a kde se zobrazují všechny informace při lazení kódu. Další jsou menší dialogové okna, která sdělují uživateli zásadní zprávy v průběhu používání. Třetí z nich je nastavení skrze konfigurační soubory. 
+
 ### Okno, toolbar, panely
+
+Okno se dělí na *toolbar* nahoře, *statusbar* dole, a *mainframe* uprostřed.
+*Toolbar* obsahuje tlačítko na vybrání souboru vlevo a tlačítka na otevření či schování postranních panelů vpravo.
+*Statusbar* obsahuje obecné informace jako název vybraného souboru, identifikační číslo procesu (tzv. "PID"), stav procesu a popřípadě na jakém řádku *zdrojového kódu* je proces zastaven.
+*Mainframe* obsahuje panely, které zobrazují veškeré informace o procesu a umožňují lazení kódu. Tyto panely můžeme přesouvat, měnit jejich velikost, a tak si přizbůsobit celé grafické prostředí.
+Každý panel má svůj titulek se jménem a pod ním svůj obsah. V horní části obsahu se soustřeďují interaktivní struktur, například tlačítka a výběry seznamů. Většina panelů má své vnitřní hodnoty, a proto můžeme používat i více panelů stejného typu zároveň.
 
 ### Panely podrobně
 
+Panelů je celkem 8 a každý plní jinou funkci.
+
+Panel "Control" obsahuje tlačítka na ovládání lazeného procesu. Zleva doprava jdou následovně: "Spustit/Zastavit", "Pokračovat/Pozastavit", "Krok", "Krok v *zdrojovém kódu*", "Ukončit", "Poslat Signál". Úplně vpravo poté můžeme vybrat signál, který chceme procesu poslat. "Krok" znamená spustit další instrukci, zatímco "Krok v *zdrojovém kódu*" spustí program a zastaví se jakmile narazí na pozici, která je spojená s pozicí v *zdrojovém kódu*.
+Panel "Memory" zobrazuje obsah paměti programu. V poli můžeme zadat adresu v šestnáctkovém nebo desítkovém zápisu. Tlačítko úplně vlevo mění počet zobrazovaných bajtů na řádek. Zbylá tlačítka specifikují formát, ve kterém jsou jednotlivé bajty zobrazovány. V těle panelu se pak zobrazují řádky s adresami a bajty. Adresa vždy ukazuje pozici prvního bajtu v řádku. Při použití kolečka na myši se můžeme pohybovat nahoru a dolu.
+Panel "Code" zobrazuje zdrojový kód lazeného programu. Nahoře můžeme vybrat tzv. kompilační složku a soubor. Tlačítko vpravu udává, jestli chceme sledovat aktuální pozici v kódu. Pozice je zobrazena přes zvýrazněné číslo řádku, na kterém právě jsme. Pokud řádek má k sobě přiřazenou adresu, můžeme na něj dát *breakpoint*. Tlačítko na breakpoint se nachází vlevo od čísla řádku.
+Panel "Registers" zobrazuje hodnotu registrů procesoru. Tlačítka nahoře číselnou soustavu, ve které jsou hodnoty zobrazovány.
+Panel "ELF Info" vypisuje informace, které nalezneme v hlavičce *ELF* souborů. Jedná se například o cílený operační systém a architekturu, vstupní adresu kódu a další.
+Panel "Terminal" funguje jako interní terminál pro stadardní komunikaci s lazeným programem. Nahoře je stadardní výstup, dole je pole pro standardní vstup. Aktuální pozice kursoru je zobrazována znakem '_'. Pro poslání standardního vstup je nutné zmáčknout klávesu "Enter".
+Panel "Assembly" vypisuje okolní assemblerový kód k aktuální pozici. Ta je značena zvýrazněnou adresou vlevo. Instrukce jsou zobrazovány ve formátu assembleru *nasm*. Jsou vypsány i bajty každé instrukce. Vedle adres jsou také tlačítka na *breakpointy*.
+Panel "CallStack" vypisuje tzv. *callstack*, neboli seznam funkcí podle toho, jak byly postupně volány. U každé funkce pak vypisuje deklarované proměnné a jejich typy a hodnoty. Řádek značící funkce je zvýrazněný. "0" znamená prvně zavolaná funkce, zpravidla "main". Funkce, struktury a seznamy vytváří odsazení v zobrazování. Proto vedle každého z nich je pro větší přehlednost tlačítko na schování či rozbalení jeho obsahu. Při aktualizaci je vždy obsah aktuální funkce rozbalen zatímco všech ostatní schován.
+
 ### Dialogová okna
 
+Dialogová okna sdělují důležité informace uživateli. Jedná se o chyby při lazení kódu, informace o průběhu spuštěného procesu a varování při nestandardních situacích.
+Zprávy o chybách vždy zobrazí příčinu chyby a případně další informace o selhání některé z funkcí. Například při pokusu o čtení neexistující lokace v paměti vyskočí okno s touto informací a s kódem chyby.
+Při skončení programu nebo zastavení přes signál se zobrazí okno upozorňující uživatele o této skutečnosti.
+Některé zprávy vyžadují rozhodnutí uživatele. Jeden z případů je selhání funkce čekání na zastavení sledovaného procesu, kde uživatel má možnost opakovat tento pokus nebo proces zastavit. Druhý nastane, pokud uživatel chce vybrat nový soubor a starý program stále běží.
+Dialogové zprávy zvyšují interaktivitu s uživatelem a zamezují přehlédnutí zásadních informací.
+
 ### Nastavení
+
+Uživatel může upřesnit nastavení aplikace v konfiguraci. Ta je psána v textové podobě ve formátu *toml*[_] a nachází v adresáři "~/.config/tbd/config.toml", kde '~' značí domovský adresář uživatele. Je nutné podotknout, že tento soubor aplikace sama nevytváří.
+Nastavení se dělí na několik částí. "Window" upřesňuje pozici a velikost okna při spuštění a také barevné schéma aplikace. V sekci "layout" můžeme nastavit rozložení a otevřené panely při spuštění. V "layout.panes" si můžeme vybrat, které panely chceme používat. Můžeme dokonce mít více panelů stejného typu. Poslední část se jménem "feature" slouží k používání experimentálních funckí. Aktuálně se jedná pouze o funkci, která zajišťuje správné rozbalování funkcí u programů, které byly psány v *Rustu*.
+Není nutné specifikovat všechna nastavení, zbytek se automaticky doplní výchozími hodnotami. Výchozí nastavení je k nalezení v souboru "code/assets/config.toml". Zde jsou také vypsané všechny možnosti a další popis jednotlivých položek.
 
 ## Typický postup při používání
 
 ### Po spuštění
 
+Po otevření hlavního okna si můžeme přemístit panely tam, kde nám vyhovují a upravit si jejich velikost. Poté můžeme vybrat soubor přes tlačítko na *toolbaru* vlevo.
+
 ### Vybrání programu a příprava na lazení
+
+Vybereme spustitelný soubor a počkáme na jeho zpracování. Poté co se načte si můžeme prohlédnout *zdrojový kód* a umístít *breakpointy* na problematická místa. Je také dobré si umístit jeden někam na začátek kódu funkce "main". Poté můžeme spustit program přes tlačítko vlevo panelu "Control".
 
 ### Začátek a průběh lazení
 
+Zobrazí se nám panely "Memory", "Registers", "Terminal" a "Assembly". Už teď si můžeme prohlížet informace o procesu. V této fázi není doporučeno používat tlačítko pro "Krok ve *zdrojovém kódu*". Můžeme tedy nechat kód běžet, až narazí na nějaký z *breakpointů*. Když se tak stane, můžeme si prohlédnou hodnoty lokálních proměnných, výstup z terminálu a přidat nebo odebrat některé *breakpointy*. *Breakpointy* bychom nikdy neměli umisťovat pokud kód právě běží. Na to máme možnost si kód pozastavit (2. tlačítko panelu "Control", když kód zrovna běží). Také bychom neměli pozastavovat kód, pokud právě čte z terminálu. Takto pokračujeme dál, tak jak potřebujeme.
+
 ### Ukončení programu
 
-## Další informace
+Pokud kód skončí, zjistíme to přes dialogové okno a dozvíme se hodnotu konečného kód (anglicky "exit code"). Program můžeme ukončit i sami přes tlačítko "Zastavení" nebo "Ukončení" (ukončení posílá signál SIGKILL). Stejný program můžeme zkusit spustit znovu nebo klidně nahrát nový. Pokud byl program ukončen signálem, tak je nám sdělen jaký signál to byl.
 
 # Seznam použitých informačních zdrojů
