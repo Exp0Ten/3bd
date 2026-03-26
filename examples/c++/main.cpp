@@ -15,13 +15,7 @@ int main() {
 
 	b += a;
 
-    for (int i = 0; i < 100000000; i++) {
-        i += 1;
-    }
-
-
-
     std::cout<<"Hello World\n";
-    test_func();
+    test_input();
     return 0;
 }

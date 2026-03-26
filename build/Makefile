@@ -1,4 +1,4 @@
-root = $(shell git rev-parse --show-toplevel)
+root = ..
 source = $(root)/code
 build = $(root)/build
 
