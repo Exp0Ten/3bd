@@ -1,7 +1,7 @@
-
+## This is the default settings of the application
 
 [feature]
-exp_rust_unwind = true 
+exp_rust_unwind = true
 # if you are debbuging programs written in rust (or you encounter errors in stack info of previous function calls) you should set this flag to true
 # it is on by default, so similarly if you encounter stack info errors (meaning the variables are showing weird values) while debbuging DWARF fully-supported languages (like c or c++), try setting this flag to false
 

@@ -1,10 +1,12 @@
 # Cíle práce
 
-Cílem mé práce bylo vytvořit debugger s grafickým uživatelským prostředím. Program umí ladit kód kompilovaných jazyků, a tak pomáhá uživateli při hledání chyb při programování. Nejdůležitější funkce lazení pro mě byly: možnost pozastavení programu, získání aktuální pozice v kódu, zobrazení stavu, ve kterém se nachází, čtení jeho paměti a zajištění komunikace skrze standardní vstup a výstup.
+Cílem mé práce bylo vytvořit debugger s grafickým uživatelským prostředím. Program umí ladit kód kompilovaných jazyků, a tak pomáhá uživateli při hledání chyb v kódu. Nejdůležitější funkce lazení pro mě byly: možnost pozastavení programu, získání aktuální pozice v kódu, zobrazení stavu, ve kterém se nachází, čtení jeho paměti a zajištění komunikace skrze standardní vstup a výstup.
 Má snaha byla hlavně vytvořit software, který je příjemný pro používání, dostatečně přizpůsobitelný a v ne menší řadě dále rozvíjitelný.
 Pochopitelně jsem také chtěl získat další zkušenosti v oblasti operačního systému Linux, nízkoúrovňového programovaní a programovacího jazyka Rust.
 
 # Způsoby řešení a použité postupy
+
+## Obecná architektura
 
 
 
@@ -79,6 +81,16 @@ Mimo hlavní knihovny jsem dále použil:
 # Zhodnocení dosažených výsledků
 
 # Instalace
+
+Ve složce *build* se nachází soubor *Makefile*, který obsahuje script pro program *make*. Stačí tedy v adresáři zadat příkaz "make" (nebo "make all") a celý program se zkompiluje a  ve stejném adresáři se vytvoří spustitelný soubor "tbd". Ten se dá poté přímo spustit pomocí "./tbd". (Pro instalaci na použití kdekoliv v systému přesuňte tento soubor do "/bin" nebo "/usr/bin" nebo přidejte cestu k soubrou do proměnné prostředí "$PATH".)
+Program nemusí být spuštěn přes terminál, je to však doporučeno pro vybrání správného spustitelného souboru.
+
+## Nároky a kompatibilita
+
+Program má podporu pouze pro operační systém Linux, měl by však fungovat na většině distribucí. 
+
+## Externí závislosti
+
 
 # Ovládání
 

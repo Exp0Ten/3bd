@@ -1776,6 +1776,7 @@ fn statusbar<'a>(state: &State, height: u16) -> Container<'a, Message> {
         if state.internal.stopped {
             let mut msg = match state.status.unwrap() {
                 nix::sys::wait::WaitStatus::Signaled(_, signal, _) => format!("Stopped: {signal}"),
+                nix::sys::wait::WaitStatus::Stopped(_, signal) => format!("Stopped: {signal}"),
                 _ => "Stopped".to_string()
             };
 

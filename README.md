@@ -10,7 +10,7 @@ This project is written in the Rust programming language.
 All of the source code is in the `code` directory, along with the assets (icons...).
 There is a makefile in `build`, that produces the binary (runs `cargo build --release` and copies the binary to the dir). To install it, either move the executable into the `/bin` directory or add the build folder to your path.
 In `docs` you will find the PDF documents that were used to create this project.
-If you want to try out some of the features, you can use the examples in the `test` folders.
+If you want to try out some of the features, you can use the examples in the `examples` folders.
 
 ## Arch
 This project is only for Linux, and limited to the AMD64 (x86_64) architecture (ARM or x86 might be possible later).
