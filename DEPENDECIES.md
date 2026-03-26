@@ -8,7 +8,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 zenity - for message dialogs (optional)
 
-For Debian an Ubuntu
+For Debian and Ubuntu
 ```sh
 sudo apt install zenity
 ```

@@ -2475,7 +2475,7 @@ impl ByteBase {
 // Widgets helpers
 
 fn scrollbar() -> scrollable::Scrollbar {
-    scrollable::Scrollbar::new().scroller_width(0).width(0)
+    scrollable::Scrollbar::new()
 }
 
 fn no_scrollbar() -> scrollable::Scrollbar {
