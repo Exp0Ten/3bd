@@ -45,7 +45,6 @@ pub trait ImplBreakpoints {
     fn add(&mut self, address: u64, byte: u8);
     fn add_future(&mut self, address: u64);
     fn rem(&mut self, address: u64) -> u8;
-    fn _is_active(&self, address: u64) -> bool;
     fn disable_all(&self) -> Result<(), ()>;
     fn enable_all(&mut self) -> Result<(), ()>;
 }
@@ -61,10 +60,6 @@ impl ImplBreakpoints for Breakpoints {
 
     fn rem(&mut self, address: u64) -> u8 {
         self.remove(&address).unwrap()
-    }
-
-    fn _is_active(&self, address: u64) -> bool {
-        self.contains_key(&address)
     }
 
     fn disable_all(&self) -> Result<(), ()> { // This doesnt actually remove the saved breakpoints, it just removes them out of the tracee's code, good for single stepping and such

@@ -5,7 +5,6 @@ use std::{
 
 use gimli::{
     DebugInfoOffset,
-    UnitHeader,
     EndianSlice,
     UnwindSection
 };
@@ -50,17 +49,12 @@ impl SourceFile {
             content: None // we load the contents when needed
         }
     }
-
-    fn _get_unit_header<'a>(&self, dwarf: &'a Dwarf) -> UnitHeader<EndianSlice<'a, Endian>> {
-        dwarf.debug_info.header_from_offset(self.compile_unit).unwrap()
-    }
 }
 
 pub type SourceMap = HashMap<PathBuf, Vec<SourceFile>>; // holds all of the source files mentioned in the LINE PROGRAMS
 
 pub trait ImplSourceMap {
     fn get_file(&self, comp_dir: PathBuf, path: PathBuf) -> Option<(&SourceFile, usize)>;
-    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf;
     fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex;
     fn index_with_line(&self, line: &SourceIndex) -> &SourceFile;
     fn index_mut(&mut self, line: &SourceIndex) -> &mut SourceFile;
@@ -76,17 +70,6 @@ impl ImplSourceMap for SourceMap {
             n+=1;
         };
         None
-    }
-
-    fn _get_comp_dir(&self, source_file: &SourceFile, dwarf: Dwarf) -> PathBuf { // gets the compilation directory from the unit, not the hash path
-        PathBuf::from(
-            dwarf.unit(
-                source_file._get_unit_header(&dwarf)
-            ).unwrap()
-            .comp_dir.unwrap()
-            .to_string_lossy()
-            .into_owned()
-        )
     }
 
     fn insert_file(&mut self, source_file: SourceFile, hash_dir: PathBuf, line_number: u64) -> SourceIndex { // we input a new file into the SourceMap, returning the SourceIndex
@@ -137,7 +120,6 @@ pub type LineAddresses = HashMap<u64, SourceIndex>; // saving the line and file 
 
 pub trait ImplLineAddresses<'a> {
     fn get_line(&'a self, address: u64) -> Option<&'a SourceIndex>;
-    fn _get_source_file(&'a self, address: u64) -> Option<SourceFile>;
     fn get_address(&'a self, line: &SourceIndex) -> Option<u64>;
 }
 
@@ -148,17 +130,6 @@ impl <'a> ImplLineAddresses<'a> for LineAddresses {
             None => ()
         }
         self.get(&normal(address)) // normal to find the normalized address
-    }
-
-    fn _get_source_file(&self, address: u64) -> Option<SourceFile> { // consuming the SourceIndex right away to get the source file
-        match self.get(&normal(address)) {
-            Some(line) => {
-                let bind = SOURCE.access();
-                let v= bind.as_ref().unwrap()[&line.hash_path].clone();
-                Some(v.get(line.index).unwrap().clone())
-            },
-            None => None
-        }
     }
 
     fn get_address(&'a self, line: &SourceIndex) -> Option<u64> { // getting the address for the SourceIndex (by iterating and matching)
